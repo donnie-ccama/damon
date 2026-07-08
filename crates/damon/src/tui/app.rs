@@ -174,7 +174,15 @@ pub fn update(m: &mut Model, snap: &Snapshot, ev: Event) -> Vec<Action> {
                 }
             }
         }
-        KeyCode::Char('N') => {} // Task 12
+        KeyCode::Char('N') => {
+            let team = match m.sel.as_ref() {
+                Some(RailSel::Team(t)) | Some(RailSel::Agent(t, _)) => Some(t.clone()),
+                None => None,
+            };
+            if let Some(team) = team {
+                m.popup = Some(Popup::NewAgent(crate::tui::popup::NewAgentForm::new(team)));
+            }
+        }
         _ => {}
     }
     Vec::new()
@@ -430,5 +438,70 @@ mod tests {
         update(&mut m, &snap, key(KeyCode::Char('x')));
         assert!(m.popup.is_none());
         assert!(m.status.as_deref().unwrap().contains("no live sessions"));
+    }
+
+    #[test]
+    fn new_agent_form_fills_and_submits() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, Event::Tick); // team row selected
+        update(&mut m, &snap, key(KeyCode::Char('N')));
+        assert!(matches!(
+            m.popup,
+            Some(crate::tui::popup::Popup::NewAgent(_))
+        ));
+        for c in "Editor".chars() {
+            update(&mut m, &snap, key(KeyCode::Char(c)));
+        }
+        update(&mut m, &snap, key(KeyCode::Tab)); // -> Role (left empty)
+        update(&mut m, &snap, key(KeyCode::Tab)); // -> Runtime
+        update(&mut m, &snap, key(KeyCode::Right)); // claude -> codex
+        update(&mut m, &snap, key(KeyCode::Tab)); // -> Source (stays New)
+        let actions = update(&mut m, &snap, key(KeyCode::Enter));
+        assert_eq!(
+            actions,
+            vec![Action::CreateAgent {
+                reference: "newsletter/Editor".into(),
+                runtime: damon_core::entity::RuntimeId::Codex,
+                role: None,
+                repo: crate::commands::agent::RepoArg::New,
+                branch: None,
+            }]
+        );
+        assert!(m.popup.is_none());
+    }
+
+    #[test]
+    fn new_agent_form_requires_name_and_clone_url() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, Event::Tick);
+        update(&mut m, &snap, key(KeyCode::Char('N')));
+        assert_eq!(update(&mut m, &snap, key(KeyCode::Enter)), vec![]); // no name
+        assert!(m.popup.is_some());
+        assert!(m.status.as_deref().unwrap().contains("name"));
+        for c in "Ed".chars() {
+            update(&mut m, &snap, key(KeyCode::Char(c)));
+        }
+        update(&mut m, &snap, key(KeyCode::Tab)); // Role
+        update(&mut m, &snap, key(KeyCode::Tab)); // Runtime
+        update(&mut m, &snap, key(KeyCode::Tab)); // Source
+        update(&mut m, &snap, key(KeyCode::Right)); // New -> Clone; target empty
+        assert_eq!(update(&mut m, &snap, key(KeyCode::Enter)), vec![]);
+        assert!(m.status.as_deref().unwrap().contains("clone URL"));
+    }
+
+    #[test]
+    fn n_uppercase_works_from_agent_row_too() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, key(KeyCode::Char('j'))); // scout (agent row)
+        update(&mut m, &snap, key(KeyCode::Char('N')));
+        match &m.popup {
+            Some(crate::tui::popup::Popup::NewAgent(f)) => {
+                assert_eq!(f.team.as_str(), "newsletter")
+            }
+            other => panic!("expected NewAgent popup, got {other:?}"),
+        }
     }
 }
