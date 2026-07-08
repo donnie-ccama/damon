@@ -52,7 +52,7 @@ session damon_newsletter_scout_1        ← tmux session, spawned in the agent's
 | git | every agent gets a repo or worktree | yes |
 | tmux ≥ 3.2 | session persistence | yes |
 | [Ghostty](https://ghostty.org) | terminal windows | recommended (any `$TERMINAL` works) |
-| [Claude Code](https://code.claude.com) | agent runtimes: Claude Code (default), Codex, OpenCode — install the ones you use | for `damon open` |
+| agent runtime: [Claude Code](https://code.claude.com) / [Codex](https://github.com/openai/codex) / [OpenCode](https://opencode.ai) | install the runtimes you use (Claude Code is the default) | for `damon open` |
 | Rust toolchain | building damon | build only |
 
 `damon doctor` checks all of these and tells you exactly what to install.
@@ -174,11 +174,12 @@ access altogether; `damon key set/rm` and any model needing a keyring key
 will fail with a clear error instead of touching the OS keychain.
 
 **Threat model:** a resolved key reaches the agent's session as an
-environment variable passed to `tmux -e` when the session is spawned. This
-is same-user-only (another user on the machine cannot read another user's
-tmux server) and the key is only transiently visible in argv of the
-short-lived `tmux` client process that sets up the session — it is never
-written to a file, log, or shell history by damon.
+environment variable (`tmux -e`) and remains in the session's process
+environment for the session's lifetime. Both that environment and the
+momentary argv of the short-lived tmux client are readable only by your own
+user account — never by other users — and damon never writes the key to a
+file, log, or shell history. Treat any process running in the session as
+able to read the key (that's what it's for).
 
 ## Data layout
 

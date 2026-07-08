@@ -13,6 +13,24 @@ pub enum TmuxError {
     Version(String),
 }
 
+/// Join args for error display, redacting `-e KEY=VALUE` values (secrets).
+fn display_args(args: &[String]) -> String {
+    let mut out: Vec<String> = Vec::with_capacity(args.len());
+    let mut prev_was_e = false;
+    for a in args {
+        if prev_was_e {
+            out.push(match a.split_once('=') {
+                Some((k, _)) => format!("{k}=***"),
+                None => "***".to_string(),
+            });
+        } else {
+            out.push(a.clone());
+        }
+        prev_was_e = a == "-e";
+    }
+    out.join(" ")
+}
+
 pub struct Tmux {
     socket: String,
 }
@@ -34,7 +52,7 @@ impl Tmux {
             .output()?;
         if !out.status.success() {
             return Err(TmuxError::Failed {
-                args: args.join(" "),
+                args: display_args(args),
                 stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
             });
         }

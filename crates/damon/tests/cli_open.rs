@@ -178,6 +178,23 @@ fn open_missing_key_names_the_fix() {
 }
 
 #[test]
+fn open_rejects_empty_keyring_account() {
+    let e = setup("keyempty");
+    std::fs::write(
+        e.cfg.path().join("models.toml"),
+        "[models.sealed]\nlabel = \"Sealed\"\nruntime = \"claude\"\nenv = { T = \"${keyring:}\" }\n",
+    )
+    .unwrap();
+    damon(&e)
+        .args(["open", "scout", "--model", "sealed"])
+        .assert()
+        .failure()
+        .stderr(contains(
+            "has an empty ${keyring:} account for \"T\" — fix models.toml",
+        ));
+}
+
+#[test]
 fn open_reattaches_highest_n_numerically() {
     let e = setup("numeric");
     for n in ["9", "10"] {

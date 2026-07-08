@@ -114,6 +114,11 @@ fn resolve_model_env(model_key: &str, name: &str, value: &str) -> anyhow::Result
         let inner = &value[2..value.len() - 1];
         if inner.starts_with("keyring:") {
             let account = inner.strip_prefix("keyring:").unwrap_or("");
+            if account.is_empty() {
+                anyhow::bail!(
+                    "model {model_key:?} has an empty ${{keyring:}} account for {name:?} — fix models.toml"
+                );
+            }
             return resolve_from_keyring(model_key, name, account);
         }
         let env_value = std::env::var(inner).map_err(|_| {
