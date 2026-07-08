@@ -66,13 +66,19 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
+#[derive(Debug, PartialEq)]
+pub struct BridgeOutput {
+    pub written: Vec<PathBuf>,
+    pub warnings: Vec<String>,
+}
+
 pub fn write_bridges(
     runtime: RuntimeId,
     agent_name: &str,
     memory_dir: &Path,
     worktree: &Path,
     damon_exe: &str,
-) -> Result<Vec<PathBuf>, CoreError> {
+) -> Result<BridgeOutput, CoreError> {
     match runtime {
         RuntimeId::Claude => {
             if memory_dir
@@ -95,13 +101,18 @@ pub fn write_bridges(
             // JSON safety: serde_json::json! escapes all special characters (quotes,
             // backslashes, etc.) correctly, so exotic exe paths like `/tmp/we"ird/damon`
             // produce valid JSON.
-            //
-            // Whitespace guard: A path containing whitespace would break the shell
-            // command line itself (the JSON is later executed by Claude Code), so we
-            // skip writing settings.json in that case — the Stop hook is an
-            // enhancement (session-end reflection), not correctness, so degrading
-            // gracefully beats emitting a broken hook.
-            if !damon_exe.chars().any(char::is_whitespace) {
+            let mut warnings = Vec::new();
+            if damon_exe.chars().any(char::is_whitespace) {
+                // Whitespace guard: A path containing whitespace would break the shell
+                // command line itself (the JSON is later executed by Claude Code), so we
+                // skip writing settings.json in that case — the Stop hook is an
+                // enhancement (session-end reflection), not correctness, so degrading
+                // gracefully beats emitting a broken hook.
+                warnings.push(format!(
+                    "damon executable path {damon_exe:?} contains whitespace; \
+                     skipping the session-end reflection hook (.claude/settings.json)"
+                ));
+            } else {
                 let settings_dir = worktree.join(".claude");
                 std::fs::create_dir_all(&settings_dir).map_err(|e| CoreError::Io {
                     path: settings_dir.clone(),
@@ -120,17 +131,23 @@ pub fn write_bridges(
                 written.push(settings);
             }
 
-            Ok(written)
+            Ok(BridgeOutput { written, warnings })
         }
         RuntimeId::Codex => {
             let path = worktree.join("AGENTS.md");
             write_atomic(&path, &embedded_bridge("Codex", agent_name, memory_dir))?;
-            Ok(vec![path])
+            Ok(BridgeOutput {
+                written: vec![path],
+                warnings: Vec::new(),
+            })
         }
         RuntimeId::Opencode => {
             let path = worktree.join("AGENTS.md");
             write_atomic(&path, &embedded_bridge("OpenCode", agent_name, memory_dir))?;
-            Ok(vec![path])
+            Ok(BridgeOutput {
+                written: vec![path],
+                warnings: Vec::new(),
+            })
         }
     }
 }
@@ -153,7 +170,7 @@ mod tests {
     #[test]
     fn write_bridges_creates_claude_md_and_settings_and_lists_both() {
         let tmp = tempfile::tempdir().unwrap();
-        let written = write_bridges(
+        let out = write_bridges(
             RuntimeId::Claude,
             "Scout",
             std::path::Path::new("/mem"),
@@ -162,7 +179,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            written,
+            out.written,
             vec![
                 tmp.path().join("CLAUDE.md"),
                 tmp.path().join(".claude/settings.json"),
@@ -177,7 +194,7 @@ mod tests {
     #[test]
     fn write_bridges_skips_settings_when_damon_exe_has_whitespace() {
         let tmp = tempfile::tempdir().unwrap();
-        let written = write_bridges(
+        let out = write_bridges(
             RuntimeId::Claude,
             "Scout",
             std::path::Path::new("/mem"),
@@ -185,7 +202,8 @@ mod tests {
             "/path with space/damon",
         )
         .unwrap();
-        assert_eq!(written, vec![tmp.path().join("CLAUDE.md")]);
+        assert_eq!(out.written, vec![tmp.path().join("CLAUDE.md")]);
+        assert_eq!(out.warnings.len(), 1);
         assert!(!tmp.path().join(".claude/settings.json").exists());
     }
 
@@ -197,9 +215,8 @@ mod tests {
         std::fs::write(memory.join("AGENT.md"), "agent").unwrap();
         std::fs::write(memory.join("USER.md"), "user").unwrap();
         std::fs::write(memory.join("MEMORY.md"), "memory").unwrap();
-        let written =
-            write_bridges(RuntimeId::Codex, "Scout", &memory, tmp.path(), "damon").unwrap();
-        assert_eq!(written, vec![tmp.path().join("AGENTS.md")]);
+        let out = write_bridges(RuntimeId::Codex, "Scout", &memory, tmp.path(), "damon").unwrap();
+        assert_eq!(out.written, vec![tmp.path().join("AGENTS.md")]);
         let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
         assert!(contents.contains("# Scout — Damon Codex agent"));
         assert!(contents.contains("agent"));
@@ -215,9 +232,9 @@ mod tests {
         std::fs::write(memory.join("AGENT.md"), "agent").unwrap();
         std::fs::write(memory.join("USER.md"), "user").unwrap();
         std::fs::write(memory.join("MEMORY.md"), "memory").unwrap();
-        let written =
+        let out =
             write_bridges(RuntimeId::Opencode, "Scout", &memory, tmp.path(), "damon").unwrap();
-        assert_eq!(written, vec![tmp.path().join("AGENTS.md")]);
+        assert_eq!(out.written, vec![tmp.path().join("AGENTS.md")]);
         let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
         assert!(contents.contains("# Scout — Damon OpenCode agent"));
         assert!(contents.contains("agent"));
@@ -241,7 +258,7 @@ mod tests {
     #[test]
     fn write_bridges_escapes_quotes_in_exe_path() {
         let tmp = tempfile::tempdir().unwrap();
-        let written = write_bridges(
+        let out = write_bridges(
             RuntimeId::Claude,
             "Scout",
             std::path::Path::new("/mem"),
@@ -250,7 +267,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            written,
+            out.written,
             vec![
                 tmp.path().join("CLAUDE.md"),
                 tmp.path().join(".claude/settings.json"),
@@ -301,6 +318,23 @@ mod tests {
         .unwrap();
         let content = std::fs::read_to_string(tmp.path().join("CLAUDE.md")).unwrap();
         assert!(content.contains("# Scout — damon agent"));
+    }
+
+    #[test]
+    fn skipping_the_hook_warns_instead_of_silence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = write_bridges(
+            RuntimeId::Claude,
+            "Scout",
+            std::path::Path::new("/mem"),
+            tmp.path(),
+            "/path with space/damon",
+        )
+        .unwrap();
+        assert_eq!(out.written, vec![tmp.path().join("CLAUDE.md")]);
+        assert_eq!(out.warnings.len(), 1);
+        assert!(out.warnings[0].contains("reflection hook"));
+        assert!(out.warnings[0].contains("whitespace"));
     }
 
     fn walk_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

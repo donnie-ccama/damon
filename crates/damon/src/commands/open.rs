@@ -57,8 +57,12 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         let worktree = store.worktree_dir(&entry.team, &entry.slug);
         let memory = store.memory_dir(&entry.team, &entry.slug);
         let damon_exe = std::env::current_exe()?.display().to_string();
-        let written = write_bridges(runtime, &agent.agent.name, &memory, &worktree, &damon_exe)?;
-        let names: Vec<String> = written
+        let bridges = write_bridges(runtime, &agent.agent.name, &memory, &worktree, &damon_exe)?;
+        for w in &bridges.warnings {
+            eprintln!("warning: {w}");
+        }
+        let names: Vec<String> = bridges
+            .written
             .iter()
             .filter_map(|p| p.strip_prefix(&worktree).ok())
             .map(|p| p.to_string_lossy().into_owned())
