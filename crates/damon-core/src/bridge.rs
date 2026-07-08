@@ -43,6 +43,29 @@ fn read_memory_file(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|_| "(missing)\n".into())
 }
 
+/// Same-directory temp file + rename: a reader (or a crash) never observes a
+/// half-written bridge file. The CLAUDE.md/settings.json PAIR stays
+/// non-transactional by design — bridges regenerate before every spawn.
+fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
+    let io = |p: &Path, e: std::io::Error| CoreError::Io {
+        path: p.to_path_buf(),
+        source: e,
+    };
+    let (parent, file_name) = match (path.parent(), path.file_name().and_then(|n| n.to_str())) {
+        (Some(p), Some(n)) => (p, n),
+        _ => {
+            return Err(CoreError::Invalid(format!(
+                "bad bridge path {}",
+                path.display()
+            )))
+        }
+    };
+    let tmp = parent.join(format!(".{file_name}.damon-tmp"));
+    std::fs::write(&tmp, content).map_err(|e| io(&tmp, e))?;
+    std::fs::rename(&tmp, path).map_err(|e| io(path, e))?;
+    Ok(())
+}
+
 pub fn write_bridges(
     runtime: RuntimeId,
     agent_name: &str,
@@ -63,12 +86,7 @@ pub fn write_bridges(
                 )));
             }
             let path = worktree.join("CLAUDE.md");
-            std::fs::write(&path, claude_bridge(agent_name, memory_dir)).map_err(|e| {
-                CoreError::Io {
-                    path: path.clone(),
-                    source: e,
-                }
-            })?;
+            write_atomic(&path, &claude_bridge(agent_name, memory_dir))?;
             let mut written = vec![path];
 
             // The Stop hook command embeds `damon_exe` inside a JSON string that
@@ -98,10 +116,7 @@ pub fn write_bridges(
                     }
                 });
                 let content = format!("{:#}\n", content);
-                std::fs::write(&settings, content).map_err(|e| CoreError::Io {
-                    path: settings.clone(),
-                    source: e,
-                })?;
+                write_atomic(&settings, &content)?;
                 written.push(settings);
             }
 
@@ -109,22 +124,12 @@ pub fn write_bridges(
         }
         RuntimeId::Codex => {
             let path = worktree.join("AGENTS.md");
-            std::fs::write(&path, embedded_bridge("Codex", agent_name, memory_dir)).map_err(
-                |e| CoreError::Io {
-                    path: path.clone(),
-                    source: e,
-                },
-            )?;
+            write_atomic(&path, &embedded_bridge("Codex", agent_name, memory_dir))?;
             Ok(vec![path])
         }
         RuntimeId::Opencode => {
             let path = worktree.join("AGENTS.md");
-            std::fs::write(&path, embedded_bridge("OpenCode", agent_name, memory_dir)).map_err(
-                |e| CoreError::Io {
-                    path: path.clone(),
-                    source: e,
-                },
-            )?;
+            write_atomic(&path, &embedded_bridge("OpenCode", agent_name, memory_dir))?;
             Ok(vec![path])
         }
     }
@@ -262,5 +267,51 @@ mod tests {
             .as_str()
             .expect("command should be a string");
         assert!(command.contains("/tmp/we\"ird/damon hook reflect"));
+    }
+
+    #[test]
+    fn bridge_writes_leave_no_temp_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_bridges(
+            RuntimeId::Claude,
+            "Scout",
+            std::path::Path::new("/mem"),
+            tmp.path(),
+            "damon",
+        )
+        .unwrap();
+        let leftovers: Vec<_> = walk_files(tmp.path())
+            .into_iter()
+            .filter(|p| p.to_string_lossy().contains("damon-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn bridge_writes_overwrite_existing_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("CLAUDE.md"), "stale").unwrap();
+        write_bridges(
+            RuntimeId::Claude,
+            "Scout",
+            std::path::Path::new("/mem"),
+            tmp.path(),
+            "damon",
+        )
+        .unwrap();
+        let content = std::fs::read_to_string(tmp.path().join("CLAUDE.md")).unwrap();
+        assert!(content.contains("# Scout — damon agent"));
+    }
+
+    fn walk_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            if entry.path().is_dir() {
+                out.extend(walk_files(&entry.path()));
+            } else {
+                out.push(entry.path());
+            }
+        }
+        out
     }
 }
