@@ -31,6 +31,12 @@ fn display_args(args: &[String]) -> String {
     out.join(" ")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub name: String,
+    pub created_unix: i64,
+}
+
 pub struct Tmux {
     socket: String,
 }
@@ -116,6 +122,62 @@ impl Tmux {
     pub fn kill_server(&self) -> Result<(), TmuxError> {
         self.run(&["kill-server".into()])?;
         Ok(())
+    }
+
+    /// Sessions with creation time (unix seconds). Missing server = empty.
+    ///
+    /// Uses `|` (not `\t`) as the field separator: tmux 3.7b silently
+    /// rewrites embedded tab bytes in `-F` output to `_`, which is
+    /// indistinguishable from underscores already used in session names
+    /// (e.g. `damon_team_agent_1`). Verified with `tmux -F $'...\t...'`
+    /// bypassing shell quoting; `|` passes through unmodified.
+    pub fn list_info(&self) -> Result<Vec<SessionInfo>, TmuxError> {
+        let args: Vec<String> = vec![
+            "list-sessions".into(),
+            "-F".into(),
+            "#{session_name}|#{session_created}".into(),
+        ];
+        let out = match self.run(&args) {
+            Ok(out) => out,
+            Err(TmuxError::Failed { stderr, .. })
+                if stderr.contains("no server running") || stderr.contains("No such file") =>
+            {
+                return Ok(Vec::new())
+            }
+            Err(e) => return Err(e),
+        };
+        Ok(out
+            .lines()
+            .filter_map(|l| {
+                let (name, created) = l.split_once('|')?;
+                Some(SessionInfo {
+                    name: name.to_string(),
+                    created_unix: created.parse().ok()?,
+                })
+            })
+            .collect())
+    }
+
+    /// One variable from the session's environment (set at spawn via `-e`).
+    pub fn env_var(&self, session: &str, var: &str) -> Result<Option<String>, TmuxError> {
+        let args: Vec<String> = vec![
+            "show-environment".into(),
+            "-t".into(),
+            session.into(),
+            var.into(),
+        ];
+        match self.run(&args) {
+            Ok(out) => Ok(out
+                .lines()
+                .next()
+                .and_then(|l| l.split_once('='))
+                .map(|(_, v)| v.to_string())),
+            // tmux exits nonzero for an unknown variable.
+            Err(TmuxError::Failed { stderr, .. }) if stderr.contains("unknown variable") => {
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 

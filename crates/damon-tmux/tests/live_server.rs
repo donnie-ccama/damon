@@ -78,3 +78,37 @@ fn version_parses() {
     let (major, _minor) = damon_tmux::version().unwrap();
     assert!(major >= 3);
 }
+
+#[test]
+fn list_info_and_env_var_report_metadata() {
+    // Use the same per-test socket + Drop-guard fixture as the tests above.
+    let tmux = scratch("info");
+    let mut env = std::collections::BTreeMap::new();
+    env.insert("DAMON_MODEL".to_string(), "claude".to_string());
+    tmux.spawn(
+        "damon_team_agent_1",
+        std::path::Path::new("/tmp"),
+        &env,
+        &["sleep".to_string(), "30".to_string()],
+    )
+    .unwrap();
+
+    let info = tmux.list_info().unwrap();
+    let s = info
+        .iter()
+        .find(|s| s.name == "damon_team_agent_1")
+        .unwrap();
+    assert!(s.created_unix > 1_500_000_000, "created={}", s.created_unix);
+
+    assert_eq!(
+        tmux.env_var("damon_team_agent_1", "DAMON_MODEL").unwrap(),
+        Some("claude".to_string())
+    );
+    assert_eq!(
+        tmux.env_var("damon_team_agent_1", "NOPE_UNSET").unwrap(),
+        None
+    );
+
+    tmux.kill("damon_team_agent_1").ok();
+    tmux.kill_server().ok();
+}
