@@ -29,6 +29,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AgentCmd,
     },
+    /// Store a provider API key in the OS keyring
+    Key {
+        #[command(subcommand)]
+        cmd: KeyCmd,
+    },
     /// Open an agent session (spawn or reattach) in the terminal
     Open {
         reference: String,
@@ -86,6 +91,14 @@ enum AgentCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum KeyCmd {
+    /// Store a provider API key in the OS keyring
+    Set { provider: String },
+    /// Remove a provider API key from the OS keyring
+    Rm { provider: String },
+}
+
 #[derive(clap::ValueEnum, Clone, Copy)]
 enum RuntimeArg {
     Claude,
@@ -135,6 +148,10 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
             }
             AgentCmd::Ls { team } => commands::agent::ls(team.as_deref()),
             AgentCmd::Rm { reference, yes } => commands::agent::rm(&reference, yes),
+        },
+        Cmd::Key { cmd } => match cmd {
+            KeyCmd::Set { provider } => commands::key::set(&provider),
+            KeyCmd::Rm { provider } => commands::key::rm(&provider),
         },
         Cmd::Open {
             reference,
