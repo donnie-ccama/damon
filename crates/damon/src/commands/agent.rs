@@ -11,7 +11,7 @@ pub enum RepoArg {
 }
 
 fn store() -> anyhow::Result<Store> {
-    Ok(Store::new(Config::load()?.root()))
+    Ok(Store::new(Config::load()?.root()?))
 }
 
 pub fn new(
@@ -71,7 +71,13 @@ pub fn new(
     let repo_result = match &repo {
         RepoArg::New => damon_git::init_new(&worktree, &branch),
         RepoArg::Clone(u) => damon_git::clone_repo(u, &worktree, &branch),
-        RepoArg::Worktree(p) => damon_git::worktree_add(&expand_tilde(p), &worktree, &branch),
+        RepoArg::Worktree(p) => match expand_tilde(p) {
+            Ok(project) => damon_git::worktree_add(&project, &worktree, &branch),
+            Err(e) => {
+                std::fs::remove_dir_all(&dir).ok();
+                anyhow::bail!("cannot resolve repo path {p:?}: {e}");
+            }
+        },
     };
     if let Err(e) = repo_result {
         let cleanup = std::fs::remove_dir_all(&dir);
@@ -119,10 +125,17 @@ pub fn rm(reference: &str, yes: bool) -> anyhow::Result<()> {
         if file.repo.source == RepoSource::Worktree {
             if let Some(project) = &file.repo.path {
                 let wt = store.worktree_dir(&entry.team, &entry.slug);
-                if let Err(e) = damon_git::worktree_remove(&expand_tilde(project), &wt) {
-                    eprintln!(
-                        "warning: git worktree remove failed ({e}); deleting directory anyway"
-                    );
+                match expand_tilde(project) {
+                    Ok(project_dir) => {
+                        if let Err(e) = damon_git::worktree_remove(&project_dir, &wt) {
+                            eprintln!(
+                                "warning: git worktree remove failed ({e}); deleting directory anyway"
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!(
+                        "warning: cannot resolve source repo path ({e}); deleting directory anyway"
+                    ),
                 }
             }
         }

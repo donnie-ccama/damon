@@ -22,7 +22,7 @@ pub struct Model {
 
 impl ModelsFile {
     pub fn load() -> Result<ModelsFile, CoreError> {
-        let path = config::Config::config_dir().join("models.toml");
+        let path = config::Config::config_dir()?.join("models.toml");
         config::load_toml_or_default(&path)
     }
 

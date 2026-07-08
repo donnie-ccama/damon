@@ -61,33 +61,43 @@ pub enum Launcher {
     Print,
 }
 
-pub fn expand_tilde(p: &str) -> PathBuf {
+fn home_dir() -> Result<PathBuf, CoreError> {
+    dirs::home_dir().ok_or(CoreError::NoHome)
+}
+
+pub fn expand_tilde(p: &str) -> Result<PathBuf, CoreError> {
     if p == "~" {
-        return dirs::home_dir().expect("no home dir");
+        return home_dir();
     }
     match p.strip_prefix("~/") {
-        Some(rest) => dirs::home_dir().expect("no home dir").join(rest),
-        None => PathBuf::from(p),
+        Some(rest) => Ok(home_dir()?.join(rest)),
+        None => Ok(PathBuf::from(p)),
     }
 }
 
+/// One layout on every OS: `<home>/.config/damon` (macOS and Linux alike),
+/// so configs stay rsync-identical across machines.
+pub fn default_config_dir(home: &Path) -> PathBuf {
+    home.join(".config").join("damon")
+}
+
 impl Config {
-    pub fn config_dir() -> PathBuf {
+    pub fn config_dir() -> Result<PathBuf, CoreError> {
         if let Ok(dir) = std::env::var("DAMON_CONFIG_DIR") {
-            return PathBuf::from(dir);
+            return Ok(PathBuf::from(dir));
         }
-        dirs::config_dir().expect("no config dir").join("damon")
+        Ok(default_config_dir(&home_dir()?))
     }
 
     /// Load `config.toml` from the config dir; missing file = defaults.
     pub fn load() -> Result<Config, CoreError> {
-        let path = Self::config_dir().join("config.toml");
+        let path = Self::config_dir()?.join("config.toml");
         load_toml_or_default(&path)
     }
 
-    pub fn root(&self) -> PathBuf {
+    pub fn root(&self) -> Result<PathBuf, CoreError> {
         if let Ok(root) = std::env::var("DAMON_ROOT") {
-            return PathBuf::from(root);
+            return Ok(PathBuf::from(root));
         }
         expand_tilde(&self.general.root)
     }
@@ -143,16 +153,37 @@ mod tests {
     fn env_root_overrides() {
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var("DAMON_ROOT", tmp.path());
-        assert_eq!(Config::default().root(), tmp.path());
+        assert_eq!(Config::default().root().unwrap(), tmp.path());
         std::env::remove_var("DAMON_ROOT");
     }
 
     #[test]
     fn expands_tilde() {
         let home = dirs::home_dir().unwrap();
-        assert_eq!(expand_tilde("~"), home);
-        assert_eq!(expand_tilde("~/damon"), home.join("damon"));
-        assert_eq!(expand_tilde("/abs/x"), std::path::PathBuf::from("/abs/x"));
+        assert_eq!(expand_tilde("~").unwrap(), home);
+        assert_eq!(expand_tilde("~/damon").unwrap(), home.join("damon"));
+        assert_eq!(
+            expand_tilde("/abs/x").unwrap(),
+            std::path::PathBuf::from("/abs/x")
+        );
+    }
+
+    #[test]
+    fn config_dir_is_dot_config_on_every_os() {
+        // Pure function: same layout on macOS and Linux, no dirs::config_dir()
+        // (which would put macOS config in ~/Library/Application Support).
+        assert_eq!(
+            default_config_dir(std::path::Path::new("/home/donnie")),
+            std::path::PathBuf::from("/home/donnie/.config/damon")
+        );
+    }
+
+    #[test]
+    fn resolution_failures_are_typed_errors_not_panics() {
+        // API-shape pin: home/config resolution returns CoreError, never panics.
+        let _: Result<std::path::PathBuf, crate::CoreError> = expand_tilde("~/x");
+        let _: Result<std::path::PathBuf, crate::CoreError> = Config::config_dir();
+        let _: Result<std::path::PathBuf, crate::CoreError> = Config::default().root();
     }
 
     #[test]

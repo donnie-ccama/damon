@@ -130,11 +130,48 @@ impl Store {
     }
 }
 
+/// A directory whose name is not a valid slug — invisible to discovery, so
+/// it must be reported rather than silently dropped.
+#[derive(Debug)]
+pub struct StrayDir {
+    /// Where it was found, relative to the root (e.g. "teams" or "teams/newsletter/agents").
+    pub context: String,
+    pub name: String,
+}
+
+impl Store {
+    /// Non-slug-named directories under `teams/` and each team's `agents/`.
+    pub fn strays(&self) -> Result<Vec<StrayDir>, CoreError> {
+        let mut out = Vec::new();
+        let (teams, team_strays) = scan_dirs(&self.root.join("teams"))?;
+        out.extend(team_strays.into_iter().map(|name| StrayDir {
+            context: "teams".to_string(),
+            name,
+        }));
+        for (slug, _dir) in teams {
+            let (_agents, agent_strays) = scan_dirs(&self.team_dir(&slug).join("agents"))?;
+            out.extend(agent_strays.into_iter().map(|name| StrayDir {
+                context: format!("teams/{slug}/agents"),
+                name,
+            }));
+        }
+        Ok(out)
+    }
+}
+
 fn slug_dirs(parent: &std::path::Path) -> Result<Vec<(Slug, PathBuf)>, CoreError> {
-    let mut out = Vec::new();
+    Ok(scan_dirs(parent)?.0)
+}
+
+/// (slug-named dirs, stray non-slug dir names), both sorted.
+type ScannedDirs = (Vec<(Slug, PathBuf)>, Vec<String>);
+
+fn scan_dirs(parent: &std::path::Path) -> Result<ScannedDirs, CoreError> {
+    let mut valid = Vec::new();
+    let mut stray = Vec::new();
     let entries = match std::fs::read_dir(parent) {
         Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((valid, stray)),
         Err(e) => {
             return Err(CoreError::Io {
                 path: parent.to_path_buf(),
@@ -146,12 +183,15 @@ fn slug_dirs(parent: &std::path::Path) -> Result<Vec<(Slug, PathBuf)>, CoreError
         if !entry.path().is_dir() {
             continue;
         }
-        if let Ok(slug) = Slug::parse(&entry.file_name().to_string_lossy()) {
-            out.push((slug, entry.path()));
+        let name = entry.file_name().to_string_lossy().into_owned();
+        match Slug::parse(&name) {
+            Ok(slug) => valid.push((slug, entry.path())),
+            Err(_) => stray.push(name),
         }
     }
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
+    valid.sort_by(|a, b| a.0.cmp(&b.0));
+    stray.sort();
+    Ok((valid, stray))
 }
 
 fn read_toml<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, String> {
@@ -181,6 +221,23 @@ mod tests {
         )
         .unwrap();
         (tmp, store)
+    }
+
+    #[test]
+    fn stray_non_slug_dirs_are_reported_not_hidden() {
+        let (tmp, store) = fixture();
+        std::fs::create_dir_all(tmp.path().join("teams/Bad Name")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("teams/newsletter/agents/Str@y")).unwrap();
+        let strays = store.strays().unwrap();
+        assert_eq!(strays.len(), 2);
+        assert!(strays
+            .iter()
+            .any(|s| s.name == "Bad Name" && s.context == "teams"));
+        assert!(strays
+            .iter()
+            .any(|s| s.name == "Str@y" && s.context == "teams/newsletter/agents"));
+        // strays never masquerade as entries
+        assert_eq!(store.teams().unwrap().len(), 2);
     }
 
     #[test]

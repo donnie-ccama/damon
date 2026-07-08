@@ -28,4 +28,6 @@ pub enum CoreError {
     Exists(String),
     #[error("{0}")]
     Invalid(String),
+    #[error("cannot resolve the home directory (is $HOME set?)")]
+    NoHome,
 }

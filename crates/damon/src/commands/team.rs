@@ -3,7 +3,7 @@ use damon_core::slug::Slug;
 use damon_core::store::Store;
 
 fn store() -> anyhow::Result<Store> {
-    Ok(Store::new(Config::load()?.root()))
+    Ok(Store::new(Config::load()?.root()?))
 }
 
 pub fn new(name: &str) -> anyhow::Result<()> {
@@ -13,11 +13,18 @@ pub fn new(name: &str) -> anyhow::Result<()> {
 }
 
 pub fn ls() -> anyhow::Result<()> {
-    for t in store()?.teams()? {
+    let store = store()?;
+    for t in store.teams()? {
         match &t.team {
             Ok(file) => println!("{:<24} {}", t.slug.as_str(), file.name),
             Err(e) => println!("{:<24} INVALID: {e}", t.slug.as_str()),
         }
+    }
+    for s in store.strays()? {
+        println!(
+            "{:<24} INVALID NAME: not a kebab-case slug (in {}/, ignored by damon)",
+            s.name, s.context
+        );
     }
     Ok(())
 }

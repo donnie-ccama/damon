@@ -18,7 +18,7 @@ struct SessionEvent<'a> {
 
 pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Result<()> {
     let config = Config::load()?;
-    let store = Store::new(config.root());
+    let store = Store::new(config.root()?);
     let entry = store.resolve(reference)?;
     let agent = entry
         .agent

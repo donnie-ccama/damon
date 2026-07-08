@@ -99,3 +99,23 @@ fn team_ls_shows_invalid_team_with_error() {
                 .and(contains("INVALID")),
         );
 }
+
+#[test]
+fn team_ls_reports_stray_dirs() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    damon(root.path(), cfg.path())
+        .args(["team", "new", "Good"])
+        .assert()
+        .success();
+    std::fs::create_dir_all(root.path().join("teams/Bad Name")).unwrap();
+    damon(root.path(), cfg.path())
+        .args(["team", "ls"])
+        .assert()
+        .success()
+        .stdout(
+            contains("good")
+                .and(contains("Bad Name"))
+                .and(contains("INVALID NAME")),
+        );
+}

@@ -3,10 +3,10 @@ use damon_core::models::DEFAULT_MODELS_TOML;
 
 pub fn run() -> anyhow::Result<()> {
     let config = Config::load()?;
-    let root = config.root();
+    let root = config.root()?;
     std::fs::create_dir_all(root.join("teams"))?;
 
-    let cfg_dir = Config::config_dir();
+    let cfg_dir = Config::config_dir()?;
     std::fs::create_dir_all(&cfg_dir)?;
     for (file, content) in [
         ("config.toml", Config::default_toml()),

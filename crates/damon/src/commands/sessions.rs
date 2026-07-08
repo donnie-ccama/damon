@@ -23,7 +23,7 @@ pub fn kill(target: &str) -> anyhow::Result<()> {
         println!("killed {target}");
         return Ok(());
     }
-    let store = Store::new(config.root());
+    let store = Store::new(config.root()?);
     let entry = store.resolve(target)?;
     let mut killed = 0;
     for name in tmux.list()? {
