@@ -25,6 +25,19 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AgentCmd,
     },
+    /// Open an agent session (spawn or reattach) in the terminal
+    Open {
+        reference: String,
+        #[arg(long)]
+        model: Option<String>,
+        /// Always spawn a fresh session
+        #[arg(long)]
+        new: bool,
+    },
+    /// List live sessions
+    Sessions,
+    /// Kill a session by name, or all of an agent's sessions
+    Kill { target: String },
 }
 
 #[derive(Subcommand)]
@@ -111,6 +124,9 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
             AgentCmd::Ls { team } => commands::agent::ls(team.as_deref()),
             AgentCmd::Rm { reference, yes } => commands::agent::rm(&reference, yes),
         },
+        Cmd::Open { reference, model, new } => commands::open::run(&reference, model.as_deref(), new),
+        Cmd::Sessions => commands::sessions::ls(),
+        Cmd::Kill { target } => commands::sessions::kill(&target),
     }
 }
 

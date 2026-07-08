@@ -215,6 +215,7 @@ dependencies = [
  "damon-term",
  "damon-tmux",
  "predicates",
+ "serde",
  "serde_json",
  "tempfile",
  "toml",
