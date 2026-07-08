@@ -40,9 +40,15 @@ pub fn clone_repo(url: &str, worktree: &Path, branch: &str) -> Result<(), GitErr
 
 pub fn worktree_add(existing_repo: &Path, worktree: &Path, branch: &str) -> Result<(), GitError> {
     let wt = worktree.to_string_lossy();
-    // New branch first; if it already exists, attach to it.
-    if git(Some(existing_repo), &["worktree", "add", "-b", branch, &wt]).is_err() {
+    let branch_exists = git(
+        Some(existing_repo),
+        &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")],
+    )
+    .is_ok();
+    if branch_exists {
         git(Some(existing_repo), &["worktree", "add", &wt, branch])?;
+    } else {
+        git(Some(existing_repo), &["worktree", "add", "-b", branch, &wt])?;
     }
     Ok(())
 }
