@@ -1,0 +1,249 @@
+//! World state, re-derived from scratch every refresh. Holds no UI state.
+use damon_core::models::ModelsFile;
+use damon_core::session_name::SessionName;
+use damon_core::slug::Slug;
+use damon_core::store::{Store, StrayDir};
+use damon_core::CoreError;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone)]
+pub struct LiveSession {
+    pub name: String,
+    pub created_unix: i64,
+    pub model: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct SessionRow {
+    pub name: String,
+    pub n: u32,
+    pub created_unix: i64,
+    pub model: String,
+}
+
+#[derive(Debug)]
+pub struct MemFile {
+    pub label: String,
+    pub path: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct AgentRow {
+    pub team: Slug,
+    pub slug: Slug,
+    /// Display name, or the agent.toml error (rendered INVALID).
+    pub display: Result<String, String>,
+    pub sessions: Vec<SessionRow>,
+    pub memory: Vec<MemFile>,
+}
+
+#[derive(Debug)]
+pub struct TeamRow {
+    pub slug: Slug,
+    pub display: Result<String, String>,
+    pub agents: Vec<AgentRow>,
+}
+
+#[derive(Debug)]
+pub struct Snapshot {
+    pub teams: Vec<TeamRow>,
+    pub strays: Vec<StrayDir>,
+    /// (registry key, label), models.toml order.
+    pub models: Vec<(String, String)>,
+}
+
+impl Snapshot {
+    pub fn build(
+        store: &Store,
+        live: &[LiveSession],
+        models: &ModelsFile,
+    ) -> Result<Snapshot, CoreError> {
+        let mut teams = Vec::new();
+        for t in store.teams()? {
+            let mut agents = Vec::new();
+            for a in store.agents(&t.slug)? {
+                let mut sessions: Vec<SessionRow> = live
+                    .iter()
+                    .filter_map(|s| {
+                        let parsed = SessionName::parse(&s.name)?;
+                        (parsed.team == a.team && parsed.agent == a.slug).then(|| SessionRow {
+                            name: s.name.clone(),
+                            n: parsed.n,
+                            created_unix: s.created_unix,
+                            model: s.model.clone().unwrap_or_else(|| "?".into()),
+                        })
+                    })
+                    .collect();
+                sessions.sort_by_key(|s| s.n);
+                agents.push(AgentRow {
+                    // memory computed first: a.team / a.slug move below.
+                    memory: memory_files(&store.memory_dir(&a.team, &a.slug)),
+                    display: match &a.agent {
+                        Ok(f) => Ok(f.agent.name.clone()),
+                        Err(e) => Err(e.clone()),
+                    },
+                    team: a.team,
+                    slug: a.slug,
+                    sessions,
+                });
+            }
+            teams.push(TeamRow {
+                display: match &t.team {
+                    Ok(f) => Ok(f.name.clone()),
+                    Err(e) => Err(e.clone()),
+                },
+                slug: t.slug,
+                agents,
+            });
+        }
+        Ok(Snapshot {
+            teams,
+            strays: store.strays()?,
+            models: models
+                .models
+                .iter()
+                .map(|(k, m)| (k.clone(), m.label.clone()))
+                .collect(),
+        })
+    }
+
+    pub fn agent(&self, team: &Slug, agent: &Slug) -> Option<&AgentRow> {
+        self.teams
+            .iter()
+            .find(|t| &t.slug == team)?
+            .agents
+            .iter()
+            .find(|a| &a.slug == agent)
+    }
+}
+
+/// AGENT/USER/MEMORY plus skills/*/SKILL.md, stable order.
+fn memory_files(dir: &Path) -> Vec<MemFile> {
+    let mut out = Vec::new();
+    for f in ["AGENT.md", "USER.md", "MEMORY.md"] {
+        let path = dir.join(f);
+        if path.is_file() {
+            out.push(MemFile {
+                label: f.to_string(),
+                path,
+            });
+        }
+    }
+    let mut skills = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir.join("skills")) {
+        for entry in entries.flatten() {
+            let skill = entry.path().join("SKILL.md");
+            if skill.is_file() {
+                skills.push(MemFile {
+                    label: format!("skills/{}/SKILL.md", entry.file_name().to_string_lossy()),
+                    path: skill,
+                });
+            }
+        }
+    }
+    skills.sort_by(|a, b| a.label.cmp(&b.label));
+    out.extend(skills);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use damon_core::models::ModelsFile;
+    use damon_core::slug::Slug;
+    use damon_core::store::Store;
+
+    fn s(x: &str) -> Slug {
+        Slug::parse(x).unwrap()
+    }
+
+    fn fixture() -> (tempfile::TempDir, Store) {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().to_path_buf());
+        store.create_team("Newsletter").unwrap();
+        let dir = store.agent_dir(&s("newsletter"), &s("scout"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("agent.toml"),
+            "[agent]\nname = \"Scout\"\nruntime = \"claude\"\ndefault_model = \"claude\"\n[repo]\nsource = \"new\"\nbranch = \"agent/scout\"\n",
+        )
+        .unwrap();
+        damon_core::memory::scaffold_memory(
+            &store.memory_dir(&s("newsletter"), &s("scout")),
+            "Scout",
+            None,
+        )
+        .unwrap();
+        (tmp, store)
+    }
+
+    #[test]
+    fn joins_agents_with_their_sessions() {
+        let (_tmp, store) = fixture();
+        let live = vec![
+            LiveSession {
+                name: "damon_newsletter_scout_2".into(),
+                created_unix: 100,
+                model: Some("kimi".into()),
+            },
+            LiveSession {
+                name: "damon_newsletter_scout_1".into(),
+                created_unix: 50,
+                model: None,
+            },
+            LiveSession {
+                name: "damon_other_agent_1".into(),
+                created_unix: 10,
+                model: None,
+            },
+            LiveSession {
+                name: "not_a_damon_session".into(),
+                created_unix: 10,
+                model: None,
+            },
+        ];
+        let snap = Snapshot::build(&store, &live, &ModelsFile::default()).unwrap();
+        assert_eq!(snap.teams.len(), 1);
+        let agent = snap.agent(&s("newsletter"), &s("scout")).unwrap();
+        assert_eq!(agent.display.as_deref().unwrap(), "Scout");
+        // sorted by n; unknown model renders "?"
+        assert_eq!(agent.sessions.len(), 2);
+        assert_eq!(agent.sessions[0].n, 1);
+        assert_eq!(agent.sessions[0].model, "?");
+        assert_eq!(agent.sessions[1].model, "kimi");
+    }
+
+    #[test]
+    fn lists_memory_files_including_skills() {
+        let (_tmp, store) = fixture();
+        let skills = store
+            .memory_dir(&s("newsletter"), &s("scout"))
+            .join("skills/research");
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::write(skills.join("SKILL.md"), "skill").unwrap();
+        let snap = Snapshot::build(&store, &[], &ModelsFile::default()).unwrap();
+        let agent = snap.agent(&s("newsletter"), &s("scout")).unwrap();
+        let labels: Vec<&str> = agent.memory.iter().map(|f| f.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "AGENT.md",
+                "USER.md",
+                "MEMORY.md",
+                "skills/research/SKILL.md"
+            ]
+        );
+    }
+
+    #[test]
+    fn carries_models_and_invalid_agents() {
+        let (_tmp, store) = fixture();
+        let bad = store.agent_dir(&s("newsletter"), &s("broken"));
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("agent.toml"), "not [valid").unwrap();
+        let snap = Snapshot::build(&store, &[], &ModelsFile::default()).unwrap();
+        assert!(snap.models.iter().any(|(k, _)| k == "claude"));
+        let broken = snap.agent(&s("newsletter"), &s("broken")).unwrap();
+        assert!(broken.display.is_err());
+    }
+}
