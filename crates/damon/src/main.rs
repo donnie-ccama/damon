@@ -13,11 +13,14 @@ struct Cli {
 enum Cmd {
     /// Scaffold ~/damon plus config.toml and models.toml
     Init,
+    /// Check required external tools
+    Doctor,
 }
 
 fn run(cmd: Cmd) -> anyhow::Result<()> {
     match cmd {
         Cmd::Init => commands::init::run(),
+        Cmd::Doctor => commands::doctor::run(),
     }
 }
 
