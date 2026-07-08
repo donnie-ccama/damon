@@ -2,6 +2,8 @@
 //! the world from the filesystem and tmux; the Model holds only UI state.
 use std::io::IsTerminal;
 
+pub mod app;
+pub mod popup;
 pub mod snapshot;
 
 pub fn run() -> anyhow::Result<()> {
