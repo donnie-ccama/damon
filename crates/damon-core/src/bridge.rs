@@ -19,14 +19,14 @@ pub fn claude_bridge(agent_name: &str, memory_dir: &Path) -> String {
     )
 }
 
-pub fn codex_bridge(agent_name: &str, memory_dir: &Path) -> String {
+pub fn embedded_bridge(runtime_label: &str, agent_name: &str, memory_dir: &Path) -> String {
     let path = memory_dir.display();
     let agent = read_memory_file(&memory_dir.join("AGENT.md"));
     let user = read_memory_file(&memory_dir.join("USER.md"));
     let memory = read_memory_file(&memory_dir.join("MEMORY.md"));
     format!(
-        "# {agent_name} — Damon Codex agent\n\n\
-         Canonical memory is embedded below because Codex has no import\n\
+        "# {agent_name} — Damon {runtime_label} agent\n\n\
+         Canonical memory is embedded below because {runtime_label} has no import\n\
          mechanism from outside the worktree.\n\n\
          ## Memory source\n\n\
          Memory root: {path}\n\n\
@@ -72,7 +72,7 @@ pub fn write_bridges(
         }
         RuntimeId::Codex => {
             let path = worktree.join("AGENTS.md");
-            std::fs::write(&path, codex_bridge(agent_name, memory_dir)).map_err(|e| {
+            std::fs::write(&path, embedded_bridge("Codex", agent_name, memory_dir)).map_err(|e| {
                 CoreError::Io {
                     path: path.clone(),
                     source: e,
@@ -80,10 +80,16 @@ pub fn write_bridges(
             })?;
             Ok(vec![path])
         }
-        other => Err(CoreError::Invalid(format!(
-            "runtime {} not yet supported (M2)",
-            other.as_str()
-        ))),
+        RuntimeId::Opencode => {
+            let path = worktree.join("AGENTS.md");
+            std::fs::write(&path, embedded_bridge("OpenCode", agent_name, memory_dir)).map_err(|e| {
+                CoreError::Io {
+                    path: path.clone(),
+                    source: e,
+                }
+            })?;
+            Ok(vec![path])
+        }
     }
 }
 
@@ -134,15 +140,20 @@ mod tests {
     }
 
     #[test]
-    fn other_runtimes_fail_until_m2() {
+    fn opencode_bridge_embeds_memory() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = write_bridges(
-            RuntimeId::Opencode,
-            "S",
-            std::path::Path::new("/m"),
-            tmp.path(),
-        );
-        assert!(err.unwrap_err().to_string().contains("M2"));
+        let memory = tmp.path().join("memory");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("AGENT.md"), "agent").unwrap();
+        std::fs::write(memory.join("USER.md"), "user").unwrap();
+        std::fs::write(memory.join("MEMORY.md"), "memory").unwrap();
+        let written = write_bridges(RuntimeId::Opencode, "Scout", &memory, tmp.path()).unwrap();
+        assert_eq!(written, vec![tmp.path().join("AGENTS.md")]);
+        let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
+        assert!(contents.contains("# Scout — Damon OpenCode agent"));
+        assert!(contents.contains("agent"));
+        assert!(contents.contains("user"));
+        assert!(contents.contains("memory"));
     }
 
     #[test]

@@ -34,7 +34,8 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
     let runtime = match model.runtime.as_str() {
         "claude" => RuntimeId::Claude,
         "codex" => RuntimeId::Codex,
-        other => anyhow::bail!("runtime {other:?} not yet supported (M2)"),
+        "opencode" => RuntimeId::Opencode,
+        other => anyhow::bail!("unknown runtime {other:?} in models.toml"),
     };
 
     let tmux = Tmux::new(config.tmux.socket.clone());

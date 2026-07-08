@@ -58,6 +58,10 @@ env = { ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1", ANTHROPIC_AUTH_TOKE
 label = "GLM 5.2"
 runtime = "claude"
 env = { ANTHROPIC_BASE_URL = "https://openrouter.ai/api/v1", ANTHROPIC_AUTH_TOKEN = "${keyring:openrouter}", ANTHROPIC_MODEL = "z-ai/glm-5.2" }
+
+[models.opencode]
+label = "OpenCode"
+runtime = "opencode"
 "#;
 
 #[cfg(test)]
@@ -67,7 +71,7 @@ mod tests {
     #[test]
     fn default_registry_has_default_models() {
         let m: ModelsFile = toml::from_str(DEFAULT_MODELS_TOML).unwrap();
-        for key in ["claude", "gpt", "gpt_openrouter", "kimi", "minimax", "glm"] {
+        for key in ["claude", "gpt", "gpt_openrouter", "kimi", "minimax", "glm", "opencode"] {
             assert!(m.get(key).is_some(), "{key}");
         }
         assert!(m.get("claude").unwrap().env.is_empty());

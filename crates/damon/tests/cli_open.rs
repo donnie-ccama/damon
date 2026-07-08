@@ -93,27 +93,38 @@ fn open_spawns_session_regenerates_bridge_and_logs() {
 }
 
 #[test]
-fn open_rejects_unknown_model_and_m2_features() {
+fn open_rejects_unknown_model() {
     let e = setup("reject");
     damon(&e)
         .args(["open", "scout", "--model", "nope"])
         .assert()
         .failure()
         .stderr(contains("model"));
+}
 
-    // Transitional: opencode runtime support lands in M2 Task 3. Until then,
-    // any opencode-runtime model must still bail with the M2 message. Write a
-    // custom models.toml so this doesn't depend on a shipped opencode entry.
-    std::fs::write(
-        e.cfg.path().join("models.toml"),
-        "[models.future]\nlabel = \"Future\"\nruntime = \"opencode\"\n",
-    )
-    .unwrap();
+#[test]
+fn open_opencode_spawns_and_writes_agents_md() {
+    let e = setup("opencode");
+    // Create an opencode agent
     damon(&e)
-        .args(["open", "scout", "--model", "future"])
+        .args(["agent", "new", "newsletter/opencode", "--runtime", "opencode", "--repo-new"])
         .assert()
-        .failure()
-        .stderr(contains("M2"));
+        .success();
+
+    // Open it with env vars for the sleep substitute binary
+    damon(&e)
+        .env("DAMON_BIN_OPENCODE", "sleep")
+        .env("DAMON_OPENCODE_ARGS", "30")
+        .args(["open", "opencode"])
+        .assert()
+        .success()
+        .stdout(contains("damon_newsletter_opencode_1"));
+
+    // Verify AGENTS.md was written
+    let agent = e.root.path().join("teams/newsletter/agents/opencode");
+    assert!(agent.join("worktree/AGENTS.md").exists());
+    let agents_content = std::fs::read_to_string(agent.join("worktree/AGENTS.md")).unwrap();
+    assert!(agents_content.contains("# opencode — Damon OpenCode agent"));
 }
 
 #[test]
