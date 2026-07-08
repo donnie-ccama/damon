@@ -1,6 +1,7 @@
 //! Core types and traits for the damon session manager.
 
 pub mod config;
+pub mod models;
 pub mod session_name;
 pub mod slug;
 
