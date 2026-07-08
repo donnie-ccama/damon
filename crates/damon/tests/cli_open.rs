@@ -152,6 +152,7 @@ fn open_missing_key_names_the_fix() {
     )
     .unwrap();
     damon(&e)
+        .env("DAMON_NO_KEYRING", "1")
         .args(["open", "scout", "--model", "sealed"])
         .assert()
         .failure()

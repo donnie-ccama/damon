@@ -145,6 +145,17 @@ fn resolve_from_keyring(
             return Ok((name.to_string(), v));
         }
     }
+
+    // Test/CI seam: skip the OS keychain entirely (deterministic missing-key path).
+    if std::env::var("DAMON_NO_KEYRING").is_ok_and(|v| !v.is_empty()) {
+        let missing = || {
+            anyhow::anyhow!(
+                "model {model_key:?} needs the {account:?} key for {name:?} — run: damon key set {account}"
+            )
+        };
+        return Err(missing());
+    }
+
     let entry = Entry::new("damon", account)
         .map_err(|e| anyhow::anyhow!("keyring unavailable for account {account:?}: {e}"))?;
     let password = entry.get_password().map_err(|_| {
