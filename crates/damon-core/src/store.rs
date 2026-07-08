@@ -199,4 +199,14 @@ mod tests {
         .unwrap();
         assert!(matches!(store.resolve("scout"), Err(CoreError::Ambiguous(_, _))));
     }
+
+    #[test]
+    fn agent_dir_without_toml_reports_invalid() {
+        let (_tmp, store) = fixture();
+        let empty = store.agent_dir(&Slug::parse("church").unwrap(), &Slug::parse("hollow").unwrap());
+        std::fs::create_dir_all(&empty).unwrap();
+        let all = store.all_agents().unwrap();
+        let hollow = all.iter().find(|a| a.slug.as_str() == "hollow").expect("hollow listed");
+        assert!(hollow.agent.is_err());
+    }
 }
