@@ -15,12 +15,36 @@ enum Cmd {
     Init,
     /// Check required external tools
     Doctor,
+    /// Manage teams
+    Team {
+        #[command(subcommand)]
+        cmd: TeamCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum TeamCmd {
+    /// Create a team
+    New { name: String },
+    /// List teams
+    Ls,
+    /// Remove a team (refuses if it has agents unless --force)
+    Rm {
+        slug: String,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 fn run(cmd: Cmd) -> anyhow::Result<()> {
     match cmd {
         Cmd::Init => commands::init::run(),
         Cmd::Doctor => commands::doctor::run(),
+        Cmd::Team { cmd } => match cmd {
+            TeamCmd::New { name } => commands::team::new(&name),
+            TeamCmd::Ls => commands::team::ls(),
+            TeamCmd::Rm { slug, force } => commands::team::rm(&slug, force),
+        },
     }
 }
 
