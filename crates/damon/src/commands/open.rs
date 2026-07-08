@@ -5,6 +5,7 @@ use damon_core::models::ModelsFile;
 use damon_core::session_name::SessionName;
 use damon_core::store::Store;
 use damon_tmux::Tmux;
+use keyring::Entry;
 use std::collections::BTreeMap;
 
 #[derive(serde::Serialize)]
@@ -32,13 +33,9 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         .ok_or_else(|| anyhow::anyhow!("unknown model {key:?} (see models.toml)"))?;
     let runtime = match model.runtime.as_str() {
         "claude" => RuntimeId::Claude,
+        "codex" => RuntimeId::Codex,
         other => anyhow::bail!("runtime {other:?} not yet supported (M2)"),
     };
-    for value in model.env.values() {
-        if value.contains("${keyring:") {
-            anyhow::bail!("model {key:?} needs a provider key; key management lands in M2");
-        }
-    }
 
     let tmux = Tmux::new(config.tmux.socket.clone());
     let live = tmux.list()?;
@@ -70,7 +67,11 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         )?;
 
         let name = SessionName::next_free(&entry.team, &entry.slug, &live).encode();
-        let mut env: BTreeMap<String, String> = model.env.clone();
+        let mut env: BTreeMap<String, String> = model
+            .env
+            .iter()
+            .map(|(k, v)| resolve_model_env(key, k, v))
+            .collect::<anyhow::Result<_>>()?;
         env.insert("DAMON_TEAM".into(), entry.team.to_string());
         env.insert("DAMON_AGENT".into(), entry.slug.to_string());
         env.insert("DAMON_MODEL".into(), key.to_string());
@@ -78,7 +79,8 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
 
         let mut command = vec![runtime.binary()];
         // Test seam: extra args for substitute binaries (e.g. sleep 30).
-        if let Ok(extra) = std::env::var("DAMON_CLAUDE_ARGS") {
+        let args_var = format!("DAMON_{}_ARGS", runtime.as_str().to_uppercase());
+        if let Ok(extra) = std::env::var(&args_var) {
             command.extend(extra.split_whitespace().map(String::from));
         }
         if let Err(e) = tmux.spawn(&name, &worktree, &env, &command) {
@@ -103,6 +105,54 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
     damon_term::launcher_for(config.terminal.launcher, config.tmux.socket.clone())
         .open(&session, &format!("{}/{}", entry.team, entry.slug))?;
     Ok(())
+}
+
+fn resolve_model_env(
+    model_key: &str,
+    name: &str,
+    value: &str,
+) -> anyhow::Result<(String, String)> {
+    if value.starts_with("${") && value.ends_with('}') && value.len() > 3 {
+        let inner = &value[2..value.len() - 1];
+        if inner.starts_with("keyring:") {
+            let account = inner.strip_prefix("keyring:").unwrap_or("");
+            return resolve_from_keyring(model_key, name, account);
+        }
+        let env_value = std::env::var(inner)
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "model {model_key:?} uses unresolved env var ${inner:?} for {name:?}"
+                )
+            })?;
+        return Ok((name.to_string(), env_value));
+    }
+
+    Ok((name.to_string(), value.to_string()))
+}
+
+fn resolve_from_keyring(
+    model_key: &str,
+    name: &str,
+    account: &str,
+) -> anyhow::Result<(String, String)> {
+    // Test/CI seam and container escape hatch: DAMON_KEY_<ACCOUNT>.
+    let seam = format!(
+        "DAMON_KEY_{}",
+        account.to_uppercase().replace(['-', '.'], "_")
+    );
+    if let Ok(v) = std::env::var(&seam) {
+        if !v.is_empty() {
+            return Ok((name.to_string(), v));
+        }
+    }
+    let entry = Entry::new("damon", account)
+        .map_err(|e| anyhow::anyhow!("keyring unavailable for account {account:?}: {e}"))?;
+    let password = entry.get_password().map_err(|_| {
+        anyhow::anyhow!(
+            "model {model_key:?} needs the {account:?} key for {name:?} — run: damon key set {account}"
+        )
+    })?;
+    Ok((name.to_string(), password))
 }
 
 fn append_log(

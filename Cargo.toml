@@ -25,6 +25,7 @@ clap = { version = "4", features = ["derive"] }
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
+keyring = "2"
 damon-core = { path = "crates/damon-core" }
 damon-git = { path = "crates/damon-git" }
 damon-tmux = { path = "crates/damon-tmux" }

@@ -37,9 +37,8 @@ session damon_newsletter_scout_1        ← tmux session, spawned in the agent's
   reattaches exactly where the agent left off. Only `damon kill` (or a
   reboot) ends a session.
 - **Model registry** — `models.toml` maps friendly names to runtime +
-  environment. Ships with Claude, GPT (Codex), Kimi, MiniMax, and GLM
-  entries. Adding a model is editing TOML, not code. *(OpenRouter key
-  storage and non-Claude runtimes activate in M2.)*
+  environment. Ships with Claude, GPT (Codex), OpenRouter GPT-5, Kimi,
+  MiniMax, and GLM entries. Adding a model is editing TOML, not code.
 - **Stateless and honest** — `damon sessions` asks tmux, `damon team ls`
   reads the filesystem. Nothing is cached, so nothing can drift. Broken
   TOML and stray directories are reported, never silently hidden.

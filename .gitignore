@@ -1,3 +1,5 @@
 /target
 .superpowers/
 ruvector.db
+agentdb.rvf
+agentdb.rvf.lock

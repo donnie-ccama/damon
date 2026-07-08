@@ -19,26 +19,60 @@ pub fn claude_bridge(agent_name: &str, memory_dir: &Path) -> String {
     )
 }
 
+pub fn codex_bridge(agent_name: &str, memory_dir: &Path) -> String {
+    let path = memory_dir.display();
+    let agent = read_memory_file(&memory_dir.join("AGENT.md"));
+    let user = read_memory_file(&memory_dir.join("USER.md"));
+    let memory = read_memory_file(&memory_dir.join("MEMORY.md"));
+    format!(
+        "# {agent_name} — Damon Codex agent\n\n\
+         Canonical memory is embedded below because Codex has no import\n\
+         mechanism from outside the worktree.\n\n\
+         ## Memory source\n\n\
+         Memory root: {path}\n\n\
+         ## AGENT.md\n{agent}\n\n\
+         ## USER.md\n{user}\n\n\
+         ## MEMORY.md\n{memory}\n\n\
+         ## Skills\n\n\
+         Read and apply instructions from {path}/skills/. Keep memory and\n\
+         `skills/*/SKILL.md` aligned with what you learn during the session.\n"
+    )
+}
+
+fn read_memory_file(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|_| "(missing)\n".into())
+}
+
 pub fn write_bridges(
     runtime: RuntimeId,
     agent_name: &str,
     memory_dir: &Path,
     worktree: &Path,
 ) -> Result<Vec<PathBuf>, CoreError> {
-    if memory_dir
-        .to_string_lossy()
-        .chars()
-        .any(char::is_whitespace)
-    {
-        return Err(CoreError::Invalid(format!(
-            "memory path {:?} contains whitespace; Claude Code @imports cannot express it — use a data root without spaces",
-            memory_dir
-        )));
-    }
     match runtime {
         RuntimeId::Claude => {
+            if memory_dir
+                .to_string_lossy()
+                .chars()
+                .any(char::is_whitespace)
+            {
+                return Err(CoreError::Invalid(format!(
+                    "memory path {:?} contains whitespace; Claude Code @imports cannot express it — use a data root without spaces",
+                    memory_dir
+                )));
+            }
             let path = worktree.join("CLAUDE.md");
             std::fs::write(&path, claude_bridge(agent_name, memory_dir)).map_err(|e| {
+                CoreError::Io {
+                    path: path.clone(),
+                    source: e,
+                }
+            })?;
+            Ok(vec![path])
+        }
+        RuntimeId::Codex => {
+            let path = worktree.join("AGENTS.md");
+            std::fs::write(&path, codex_bridge(agent_name, memory_dir)).map_err(|e| {
                 CoreError::Io {
                     path: path.clone(),
                     source: e,
@@ -83,10 +117,27 @@ mod tests {
     }
 
     #[test]
+    fn codex_bridge_embeds_memory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let memory = tmp.path().join("memory");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("AGENT.md"), "agent").unwrap();
+        std::fs::write(memory.join("USER.md"), "user").unwrap();
+        std::fs::write(memory.join("MEMORY.md"), "memory").unwrap();
+        let written = write_bridges(RuntimeId::Codex, "Scout", &memory, tmp.path()).unwrap();
+        assert_eq!(written, vec![tmp.path().join("AGENTS.md")]);
+        let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
+        assert!(contents.contains("# Scout — Damon Codex agent"));
+        assert!(contents.contains("agent"));
+        assert!(contents.contains("user"));
+        assert!(contents.contains("memory"));
+    }
+
+    #[test]
     fn other_runtimes_fail_until_m2() {
         let tmp = tempfile::tempdir().unwrap();
         let err = write_bridges(
-            RuntimeId::Codex,
+            RuntimeId::Opencode,
             "S",
             std::path::Path::new("/m"),
             tmp.path(),

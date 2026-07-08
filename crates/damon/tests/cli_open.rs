@@ -100,11 +100,62 @@ fn open_rejects_unknown_model_and_m2_features() {
         .assert()
         .failure()
         .stderr(contains("model"));
+
+    // Transitional: opencode runtime support lands in M2 Task 3. Until then,
+    // any opencode-runtime model must still bail with the M2 message. Write a
+    // custom models.toml so this doesn't depend on a shipped opencode entry.
+    std::fs::write(
+        e.cfg.path().join("models.toml"),
+        "[models.future]\nlabel = \"Future\"\nruntime = \"opencode\"\n",
+    )
+    .unwrap();
     damon(&e)
-        .args(["open", "scout", "--model", "kimi"])
+        .args(["open", "scout", "--model", "future"])
         .assert()
         .failure()
         .stderr(contains("M2"));
+}
+
+#[test]
+fn open_resolves_keyring_placeholder_via_seam() {
+    let e = setup("keyseam");
+    std::fs::write(
+        e.cfg.path().join("models.toml"),
+        "[models.sealed]\nlabel = \"Sealed\"\nruntime = \"claude\"\nenv = { FAKE_TOKEN = \"${keyring:damontest}\" }\n",
+    )
+    .unwrap();
+    damon(&e)
+        .env("DAMON_KEY_DAMONTEST", "sekrit-42")
+        .args(["open", "scout", "--model", "sealed"])
+        .assert()
+        .success();
+    let out = std::process::Command::new("tmux")
+        .args([
+            "-L",
+            &e.socket,
+            "show-environment",
+            "-t",
+            "damon_newsletter_scout_1",
+            "FAKE_TOKEN",
+        ])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("FAKE_TOKEN=sekrit-42"));
+}
+
+#[test]
+fn open_missing_key_names_the_fix() {
+    let e = setup("keymiss");
+    std::fs::write(
+        e.cfg.path().join("models.toml"),
+        "[models.sealed]\nlabel = \"Sealed\"\nruntime = \"claude\"\nenv = { T = \"${keyring:damon-test-noexist-xyz}\" }\n",
+    )
+    .unwrap();
+    damon(&e)
+        .args(["open", "scout", "--model", "sealed"])
+        .assert()
+        .failure()
+        .stderr(contains("damon key set damon-test-noexist-xyz"));
 }
 
 #[test]
