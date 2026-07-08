@@ -1,4 +1,5 @@
 mod commands;
+mod tui;
 
 use clap::{Parser, Subcommand};
 
@@ -53,6 +54,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: HookCmd,
     },
+    /// Launch the interactive TUI
+    Ui,
 }
 
 #[derive(Subcommand)]
@@ -175,6 +178,7 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
         Cmd::Hook { cmd } => match cmd {
             HookCmd::Reflect => commands::hook::reflect(),
         },
+        Cmd::Ui => tui::run(),
     }
 }
 
