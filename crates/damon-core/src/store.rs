@@ -167,11 +167,9 @@ fn slug_dirs(parent: &std::path::Path) -> Result<Vec<(Slug, PathBuf)>, CoreError
 type ScannedDirs = (Vec<(Slug, PathBuf)>, Vec<String>);
 
 fn scan_dirs(parent: &std::path::Path) -> Result<ScannedDirs, CoreError> {
-    let mut valid = Vec::new();
-    let mut stray = Vec::new();
     let entries = match std::fs::read_dir(parent) {
         Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((valid, stray)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), Vec::new())),
         Err(e) => {
             return Err(CoreError::Io {
                 path: parent.to_path_buf(),
@@ -179,19 +177,37 @@ fn scan_dirs(parent: &std::path::Path) -> Result<ScannedDirs, CoreError> {
             })
         }
     };
-    for entry in entries.flatten() {
-        if !entry.path().is_dir() {
+    Ok(classify_entries(entries.map(|r| {
+        r.map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+    })))
+}
+
+/// Split raw directory entries into slug-named dirs and reportable strays.
+/// An unreadable entry becomes a stray — never silently dropped.
+fn classify_entries(
+    entries: impl Iterator<Item = std::io::Result<(String, PathBuf)>>,
+) -> ScannedDirs {
+    let mut valid = Vec::new();
+    let mut stray = Vec::new();
+    for entry in entries {
+        let (name, path) = match entry {
+            Ok(pair) => pair,
+            Err(e) => {
+                stray.push(format!("<unreadable entry: {e}>"));
+                continue;
+            }
+        };
+        if !path.is_dir() {
             continue;
         }
-        let name = entry.file_name().to_string_lossy().into_owned();
         match Slug::parse(&name) {
-            Ok(slug) => valid.push((slug, entry.path())),
+            Ok(slug) => valid.push((slug, path)),
             Err(_) => stray.push(name),
         }
     }
     valid.sort_by(|a, b| a.0.cmp(&b.0));
     stray.sort();
-    Ok((valid, stray))
+    (valid, stray)
 }
 
 fn read_toml<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<T, String> {
@@ -314,5 +330,20 @@ mod tests {
             .find(|a| a.slug.as_str() == "hollow")
             .expect("hollow listed");
         assert!(hollow.agent.is_err());
+    }
+
+    #[test]
+    fn unreadable_dir_entries_become_strays_not_silence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let good = tmp.path().join("scout");
+        std::fs::create_dir_all(&good).unwrap();
+        let entries: Vec<std::io::Result<(String, std::path::PathBuf)>> = vec![
+            Ok(("scout".to_string(), good.clone())),
+            Err(std::io::Error::other("boom")),
+        ];
+        let (valid, stray) = classify_entries(entries.into_iter());
+        assert_eq!(valid.len(), 1);
+        assert_eq!(valid[0].0.as_str(), "scout");
+        assert_eq!(stray, vec!["<unreadable entry: boom>".to_string()]);
     }
 }
