@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 /// CLAUDE.md that imports the agent's canonical memory (absolute paths, since
 /// memory lives outside the worktree). Regenerated before every spawn.
+///
+/// `memory_dir` must be an absolute path without whitespace (validated by `write_bridges`).
 pub fn claude_bridge(agent_name: &str, memory_dir: &Path) -> String {
     let m = memory_dir.display();
     format!(
@@ -23,6 +25,12 @@ pub fn write_bridges(
     memory_dir: &Path,
     worktree: &Path,
 ) -> Result<Vec<PathBuf>, CoreError> {
+    if memory_dir.to_string_lossy().chars().any(char::is_whitespace) {
+        return Err(CoreError::Invalid(format!(
+            "memory path {:?} contains whitespace; Claude Code @imports cannot express it — use a data root without spaces",
+            memory_dir
+        )));
+    }
     match runtime {
         RuntimeId::Claude => {
             let path = worktree.join("CLAUDE.md");
@@ -31,7 +39,7 @@ pub fn write_bridges(
             Ok(vec![path])
         }
         other => Err(CoreError::Invalid(format!(
-            "runtime {:?} not yet supported (M2)",
+            "runtime {} not yet supported (M2)",
             other.as_str()
         ))),
     }
@@ -66,5 +74,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let err = write_bridges(RuntimeId::Codex, "S", std::path::Path::new("/m"), tmp.path());
         assert!(err.unwrap_err().to_string().contains("M2"));
+    }
+
+    #[test]
+    fn write_bridges_rejects_whitespace_memory_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = write_bridges(RuntimeId::Claude, "S", std::path::Path::new("/me m"), tmp.path());
+        assert!(err.unwrap_err().to_string().contains("whitespace"));
     }
 }
