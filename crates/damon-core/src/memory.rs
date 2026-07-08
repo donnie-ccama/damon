@@ -9,9 +9,19 @@ pub const MEMORY_MD: &str = "# Memory\n\nYour notes: project conventions, tool q
 
 pub fn scaffold_memory(dir: &Path, name: &str, role: Option<&str>) -> Result<(), CoreError> {
     let io = |p: &Path, e: std::io::Error| CoreError::Io { path: p.to_path_buf(), source: e };
-    std::fs::create_dir_all(dir.join("skills")).map_err(|e| io(dir, e))?;
+    let skills = dir.join("skills");
+    std::fs::create_dir_all(&skills).map_err(|e| io(&skills, e))?;
+
+    // Single-pass render: replace {role} in template segments only, then join with name
+    let role_text = role.unwrap_or("Role: to be shaped in conversation.");
+    let agent_md: String = AGENT_MD
+        .split("{name}")
+        .map(|seg| seg.replace("{role}", role_text))
+        .collect::<Vec<_>>()
+        .join(name);
+
     let files = [
-        ("AGENT.md", AGENT_MD.replace("{name}", name).replace("{role}", role.unwrap_or("Role: to be shaped in conversation."))),
+        ("AGENT.md", agent_md),
         ("USER.md", USER_MD.to_string()),
         ("MEMORY.md", MEMORY_MD.to_string()),
     ];
@@ -47,5 +57,22 @@ mod tests {
         std::fs::write(tmp.path().join("AGENT.md"), "precious").unwrap();
         scaffold_memory(tmp.path(), "Scout", None).unwrap();
         assert_eq!(std::fs::read_to_string(tmp.path().join("AGENT.md")).unwrap(), "precious");
+    }
+
+    #[test]
+    fn role_none_seeds_placeholder() {
+        let tmp = tempfile::tempdir().unwrap();
+        scaffold_memory(tmp.path(), "Scout", None).unwrap();
+        let agent = std::fs::read_to_string(tmp.path().join("AGENT.md")).unwrap();
+        assert!(agent.contains("Role: to be shaped in conversation."));
+    }
+
+    #[test]
+    fn braces_in_name_and_role_render_literally() {
+        let tmp = tempfile::tempdir().unwrap();
+        scaffold_memory(tmp.path(), "Bob{role}", Some("Helps with {name} things")).unwrap();
+        let agent = std::fs::read_to_string(tmp.path().join("AGENT.md")).unwrap();
+        assert!(agent.contains("# Bob{role}"));
+        assert!(agent.contains("Helps with {name} things"));
     }
 }
