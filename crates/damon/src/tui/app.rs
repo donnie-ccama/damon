@@ -250,7 +250,6 @@ mod tests {
                 display: Ok("Newsletter".into()),
                 agents: vec![
                     AgentRow {
-                        team: s("newsletter"),
                         slug: s("scout"),
                         display: Ok("Scout".into()),
                         sessions: vec![],
@@ -260,7 +259,6 @@ mod tests {
                         }],
                     },
                     AgentRow {
-                        team: s("newsletter"),
                         slug: s("writer"),
                         display: Ok("Writer".into()),
                         sessions: vec![],
@@ -291,8 +289,10 @@ mod tests {
     #[test]
     fn vanished_selection_snaps_back_to_first_row() {
         let snap = snap_fixture();
-        let mut m = Model::default();
-        m.sel = Some(RailSel::Agent(s("gone"), s("gone")));
+        let mut m = Model {
+            sel: Some(RailSel::Agent(s("gone"), s("gone"))),
+            ..Default::default()
+        };
         update(&mut m, &snap, Event::Tick);
         assert_eq!(m.sel, Some(RailSel::Team(s("newsletter"))));
     }
@@ -356,12 +356,14 @@ mod tests {
     #[test]
     fn preview_scrolls_and_escapes() {
         let snap = snap_fixture();
-        let mut m = Model::default();
-        m.preview = Some(Preview {
-            title: "t".into(),
-            content: "c".into(),
-            scroll: 0,
-        });
+        let mut m = Model {
+            preview: Some(Preview {
+                title: "t".into(),
+                content: "c".into(),
+                scroll: 0,
+            }),
+            ..Default::default()
+        };
         update(&mut m, &snap, key(KeyCode::Char('j')));
         assert_eq!(m.preview.as_ref().unwrap().scroll, 1);
         update(&mut m, &snap, key(KeyCode::Esc));

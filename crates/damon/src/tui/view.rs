@@ -291,7 +291,6 @@ mod tests {
                 slug: s("newsletter"),
                 display: Ok("Newsletter".into()),
                 agents: vec![AgentRow {
-                    team: s("newsletter"),
                     slug: s("scout"),
                     display: Ok("Scout".into()),
                     sessions: vec![SessionRow {
@@ -331,8 +330,10 @@ mod tests {
 
     #[test]
     fn rail_shows_team_agent_and_badge() {
-        let mut m = Model::default();
-        m.sel = Some(RailSel::Agent(s("newsletter"), s("scout")));
+        let m = Model {
+            sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
+            ..Default::default()
+        };
         let text = rendered(&m, &snap());
         assert!(text.contains("Newsletter"));
         assert!(text.contains("Scout"));
@@ -341,8 +342,10 @@ mod tests {
 
     #[test]
     fn sessions_tab_shows_name_model_uptime() {
-        let mut m = Model::default();
-        m.sel = Some(RailSel::Agent(s("newsletter"), s("scout")));
+        let m = Model {
+            sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
+            ..Default::default()
+        };
         let text = rendered(&m, &snap());
         assert!(text.contains("damon_newsletter_scout_1"));
         assert!(text.contains("kimi"));
@@ -351,9 +354,11 @@ mod tests {
 
     #[test]
     fn memory_tab_lists_files_and_preview_renders_content() {
-        let mut m = Model::default();
-        m.sel = Some(RailSel::Agent(s("newsletter"), s("scout")));
-        m.tab = Tab::Memory;
+        let mut m = Model {
+            sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
+            tab: Tab::Memory,
+            ..Default::default()
+        };
         let text = rendered(&m, &snap());
         assert!(text.contains("AGENT.md"));
         m.preview = Some(crate::tui::app::Preview {
@@ -377,11 +382,13 @@ mod tests {
 
     #[test]
     fn popups_render_over_the_frame() {
-        let mut m = Model::default();
-        m.popup = Some(crate::tui::popup::Popup::ConfirmKill {
-            reference: "newsletter/scout".into(),
-            count: 2,
-        });
+        let m = Model {
+            popup: Some(crate::tui::popup::Popup::ConfirmKill {
+                reference: "newsletter/scout".into(),
+                count: 2,
+            }),
+            ..Default::default()
+        };
         let text = rendered(&m, &snap());
         assert!(text.contains("kill 2 session(s) of newsletter/scout?"));
     }

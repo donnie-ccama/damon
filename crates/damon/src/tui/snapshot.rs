@@ -29,7 +29,6 @@ pub struct MemFile {
 
 #[derive(Debug)]
 pub struct AgentRow {
-    pub team: Slug,
     pub slug: Slug,
     /// Display name, or the agent.toml error (rendered INVALID).
     pub display: Result<String, String>,
@@ -76,13 +75,12 @@ impl Snapshot {
                     .collect();
                 sessions.sort_by_key(|s| s.n);
                 agents.push(AgentRow {
-                    // memory computed first: a.team / a.slug move below.
+                    // memory computed first: a.slug moves below.
                     memory: memory_files(&store.memory_dir(&a.team, &a.slug)),
                     display: match &a.agent {
                         Ok(f) => Ok(f.agent.name.clone()),
                         Err(e) => Err(e.clone()),
                     },
-                    team: a.team,
                     slug: a.slug,
                     sessions,
                 });
@@ -245,5 +243,44 @@ mod tests {
         assert!(snap.models.iter().any(|(k, _)| k == "claude"));
         let broken = snap.agent(&s("newsletter"), &s("broken")).unwrap();
         assert!(broken.display.is_err());
+    }
+
+    struct SocketGuard(damon_tmux::Tmux);
+    impl Drop for SocketGuard {
+        fn drop(&mut self) {
+            self.0.kill_server().ok();
+        }
+    }
+
+    #[test]
+    fn builds_from_a_real_tmux_server() {
+        let (_tmp, store) = fixture();
+        let tmux = damon_tmux::Tmux::new(format!("damon-test-tui-{}", std::process::id()));
+        let guard = SocketGuard(tmux);
+        let tmux = &guard.0;
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("DAMON_MODEL".to_string(), "claude".to_string());
+        tmux.spawn(
+            "damon_newsletter_scout_1",
+            std::path::Path::new("/tmp"),
+            &env,
+            &["sleep".to_string(), "30".to_string()],
+        )
+        .unwrap();
+
+        let mut live = Vec::new();
+        for info in tmux.list_info().unwrap() {
+            let model = tmux.env_var(&info.name, "DAMON_MODEL").ok().flatten();
+            live.push(LiveSession {
+                name: info.name,
+                created_unix: info.created_unix,
+                model,
+            });
+        }
+        let snap = Snapshot::build(&store, &live, &ModelsFile::default()).unwrap();
+        let agent = snap.agent(&s("newsletter"), &s("scout")).unwrap();
+        assert_eq!(agent.sessions.len(), 1);
+        assert_eq!(agent.sessions[0].model, "claude");
+        assert!(agent.sessions[0].created_unix > 1_500_000_000);
     }
 }
