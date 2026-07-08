@@ -1,13 +1,13 @@
 use std::fmt;
 
-/// Kebab-case identifier: `^[a-z0-9][a-z0-9-]{0,31}$`. Excludes `_` so tmux
-/// session names (underscore-joined) parse unambiguously.
+/// Kebab-case identifier: `^[a-z0-9][a-z0-9-]{0,31}$`, no trailing dash. Excludes `_` so
+/// tmux session names (underscore-joined) parse unambiguously.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(transparent)]
 pub struct Slug(String);
 
 #[derive(thiserror::Error, Debug)]
-#[error("invalid slug {0:?} (want ^[a-z0-9][a-z0-9-]{{0,31}}$)")]
+#[error("invalid slug {0:?} (want ^[a-z0-9][a-z0-9-]{{0,31}}$ with no trailing dash)")]
 pub struct SlugError(pub String);
 
 impl Slug {
@@ -37,7 +37,7 @@ impl Slug {
         let rest_ok = s
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if first_ok && rest_ok && s.len() <= 32 {
+        if first_ok && rest_ok && s.len() <= 32 && !s.ends_with('-') {
             Ok(Slug(s.to_string()))
         } else {
             Err(SlugError(s.to_string()))
@@ -98,6 +98,8 @@ mod tests {
         assert!(Slug::parse("bad_name").is_err()); // underscore reserved for session names
         assert!(Slug::parse("-lead").is_err()); // must start alphanumeric
         assert!(Slug::parse(&"a".repeat(33)).is_err());
+        assert!(Slug::parse("scout-").is_err()); // trailing dash: derive never emits one
+        assert!(Slug::parse("s-c-o").is_ok());
     }
 
     #[test]
