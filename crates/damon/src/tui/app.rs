@@ -153,7 +153,28 @@ pub fn update(m: &mut Model, snap: &Snapshot, ev: Event) -> Vec<Action> {
         }
         KeyCode::Char('m') => m.tab = Tab::Memory,
         KeyCode::Enter => return on_enter(m, snap),
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('x') => {} // Tasks 11-12
+        KeyCode::Char('n') => {
+            if let (Some(reference), false) = (reference(m), snap.models.is_empty()) {
+                m.popup = Some(Popup::ModelPicker(crate::tui::popup::ModelPicker {
+                    reference,
+                    models: snap.models.clone(),
+                    selected: 0,
+                }));
+            }
+        }
+        KeyCode::Char('x') => {
+            if let (Some(reference), Some(agent)) = (reference(m), m.selected_agent(snap)) {
+                if agent.sessions.is_empty() {
+                    m.status = Some(format!("no live sessions for {reference}"));
+                } else {
+                    m.popup = Some(Popup::ConfirmKill {
+                        reference,
+                        count: agent.sessions.len(),
+                    });
+                }
+            }
+        }
+        KeyCode::Char('N') => {} // Task 12
         _ => {}
     }
     Vec::new()
@@ -337,5 +358,77 @@ mod tests {
         assert_eq!(m.preview.as_ref().unwrap().scroll, 1);
         update(&mut m, &snap, key(KeyCode::Esc));
         assert!(m.preview.is_none());
+    }
+
+    #[test]
+    fn n_opens_model_picker_and_enter_spawns_fresh() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, key(KeyCode::Char('j'))); // scout
+        update(&mut m, &snap, key(KeyCode::Char('n')));
+        assert!(matches!(
+            m.popup,
+            Some(crate::tui::popup::Popup::ModelPicker(_))
+        ));
+        let actions = update(&mut m, &snap, key(KeyCode::Enter));
+        assert_eq!(
+            actions,
+            vec![Action::Open {
+                reference: "newsletter/scout".into(),
+                model: Some("claude".into()),
+                fresh: true
+            }]
+        );
+        assert!(m.popup.is_none());
+    }
+
+    #[test]
+    fn n_on_team_row_does_nothing() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, Event::Tick); // team row
+        update(&mut m, &snap, key(KeyCode::Char('n')));
+        assert!(m.popup.is_none());
+    }
+
+    #[test]
+    fn x_confirms_before_killing_and_esc_cancels() {
+        let mut snap = snap_fixture();
+        snap.teams[0].agents[0]
+            .sessions
+            .push(crate::tui::snapshot::SessionRow {
+                name: "damon_newsletter_scout_1".into(),
+                n: 1,
+                created_unix: 0,
+                model: "claude".into(),
+            });
+        let mut m = Model::default();
+        update(&mut m, &snap, key(KeyCode::Char('j'))); // scout
+        update(&mut m, &snap, key(KeyCode::Char('x')));
+        assert!(matches!(
+            m.popup,
+            Some(crate::tui::popup::Popup::ConfirmKill { .. })
+        ));
+        assert_eq!(update(&mut m, &snap, key(KeyCode::Esc)), vec![]);
+        assert!(m.popup.is_none());
+        update(&mut m, &snap, key(KeyCode::Char('x')));
+        let actions = update(&mut m, &snap, key(KeyCode::Char('y')));
+        assert_eq!(
+            actions,
+            vec![Action::Kill {
+                reference: "newsletter/scout".into()
+            }]
+        );
+        assert!(m.popup.is_none());
+    }
+
+    #[test]
+    fn x_with_no_sessions_sets_status_not_popup() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, key(KeyCode::Char('j')));
+        update(&mut m, &snap, key(KeyCode::Char('x')));
+        assert!(m.popup.is_none());
+        assert!(m.status.as_deref().unwrap().contains("no live sessions"));
     }
 }
