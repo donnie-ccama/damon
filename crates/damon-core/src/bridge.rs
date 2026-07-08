@@ -72,11 +72,17 @@ pub fn write_bridges(
             let mut written = vec![path];
 
             // The Stop hook command embeds `damon_exe` inside a JSON string that
-            // is itself run as a shell command by Claude Code. A path containing
-            // whitespace would break both the JSON and the resulting command
-            // line, so we skip writing settings.json in that case — the Stop
-            // hook is an enhancement (session-end reflection), not correctness,
-            // so degrading gracefully beats emitting a broken hook.
+            // is itself run as a shell command by Claude Code.
+            //
+            // JSON safety: serde_json::json! escapes all special characters (quotes,
+            // backslashes, etc.) correctly, so exotic exe paths like `/tmp/we"ird/damon`
+            // produce valid JSON.
+            //
+            // Whitespace guard: A path containing whitespace would break the shell
+            // command line itself (the JSON is later executed by Claude Code), so we
+            // skip writing settings.json in that case — the Stop hook is an
+            // enhancement (session-end reflection), not correctness, so degrading
+            // gracefully beats emitting a broken hook.
             if !damon_exe.chars().any(char::is_whitespace) {
                 let settings_dir = worktree.join(".claude");
                 std::fs::create_dir_all(&settings_dir).map_err(|e| CoreError::Io {
@@ -84,10 +90,14 @@ pub fn write_bridges(
                     source: e,
                 })?;
                 let settings = settings_dir.join("settings.json");
-                let content = format!(
-                    "{{\n  \"hooks\": {{\n    \"Stop\": [\n      {{ \"hooks\": [ {{ \"type\": \"command\", \"command\": \"{} hook reflect\" }} ] }}\n    ]\n  }}\n}}\n",
-                    damon_exe
-                );
+                let content = serde_json::json!({
+                    "hooks": {
+                        "Stop": [
+                            { "hooks": [ { "type": "command", "command": format!("{damon_exe} hook reflect") } ] }
+                        ]
+                    }
+                });
+                let content = format!("{:#}\n", content);
                 std::fs::write(&settings, content).map_err(|e| CoreError::Io {
                     path: settings.clone(),
                     source: e,
@@ -221,5 +231,36 @@ mod tests {
             "damon",
         );
         assert!(err.unwrap_err().to_string().contains("whitespace"));
+    }
+
+    #[test]
+    fn write_bridges_escapes_quotes_in_exe_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let written = write_bridges(
+            RuntimeId::Claude,
+            "Scout",
+            std::path::Path::new("/mem"),
+            tmp.path(),
+            "/tmp/we\"ird/damon",
+        )
+        .unwrap();
+        assert_eq!(
+            written,
+            vec![
+                tmp.path().join("CLAUDE.md"),
+                tmp.path().join(".claude/settings.json"),
+            ]
+        );
+        let settings = std::fs::read_to_string(tmp.path().join(".claude/settings.json")).unwrap();
+
+        // Verify the JSON is valid by parsing it
+        let parsed: serde_json::Value = serde_json::from_str(&settings)
+            .expect("settings.json should be valid JSON even with quotes in exe path");
+
+        // Verify the command field contains the raw path (with escaped quotes in the JSON)
+        let command = parsed["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .expect("command should be a string");
+        assert!(command.contains("/tmp/we\"ird/damon hook reflect"));
     }
 }
