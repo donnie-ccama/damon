@@ -17,7 +17,26 @@ struct SessionEvent<'a> {
     runtime: &'a str,
 }
 
+pub struct OpenOutcome {
+    pub session: String,
+    pub warnings: Vec<String>,
+}
+
 pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Result<()> {
+    let out = open_session(reference, model_key, new)?;
+    for w in &out.warnings {
+        eprintln!("warning: {w}");
+    }
+    println!("session {}", out.session);
+    Ok(())
+}
+
+pub fn open_session(
+    reference: &str,
+    model_key: Option<&str>,
+    fresh: bool,
+) -> anyhow::Result<OpenOutcome> {
+    let mut warnings: Vec<String> = Vec::new();
     let config = Config::load()?;
     let store = Store::new(config.root()?);
     let entry = store.resolve(reference)?;
@@ -47,7 +66,7 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         })
         .collect();
 
-    let session = if !new && !mine.is_empty() {
+    let session = if !fresh && !mine.is_empty() {
         mine.iter()
             .max_by_key(|s| SessionName::parse(s).map(|n| n.n).unwrap_or(0))
             .unwrap()
@@ -58,9 +77,7 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         let memory = store.memory_dir(&entry.team, &entry.slug);
         let damon_exe = std::env::current_exe()?.display().to_string();
         let bridges = write_bridges(runtime, &agent.agent.name, &memory, &worktree, &damon_exe)?;
-        for w in &bridges.warnings {
-            eprintln!("warning: {w}");
-        }
+        warnings.extend(bridges.warnings.iter().cloned());
         let names: Vec<String> = bridges
             .written
             .iter()
@@ -102,15 +119,16 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
             runtime: runtime.as_str(),
         };
         if let Err(log_err) = append_log(&store, &entry.team, &entry.slug, &event) {
-            eprintln!("warning: session created but log append failed: {log_err:#}");
+            warnings.push(format!(
+                "session created but log append failed: {log_err:#}"
+            ));
         }
         name
     };
 
-    println!("session {session}");
     damon_term::launcher_for(config.terminal.launcher, config.tmux.socket.clone())
         .open(&session, &format!("{}/{}", entry.team, entry.slug))?;
-    Ok(())
+    Ok(OpenOutcome { session, warnings })
 }
 
 fn resolve_model_env(model_key: &str, name: &str, value: &str) -> anyhow::Result<(String, String)> {

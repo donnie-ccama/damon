@@ -4,6 +4,7 @@ use damon_core::memory::scaffold_memory;
 use damon_core::slug::Slug;
 use damon_core::store::Store;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoArg {
     New,
     Clone(String),
@@ -21,6 +22,20 @@ pub fn new(
     repo: RepoArg,
     branch: Option<String>,
 ) -> anyhow::Result<()> {
+    let branch_msg = branch.clone();
+    let (team, slug) = create(reference, runtime, role, repo, branch)?;
+    let branch = branch_msg.unwrap_or_else(|| format!("agent/{slug}"));
+    println!("created agent {team}/{slug} (branch {branch})");
+    Ok(())
+}
+
+pub fn create(
+    reference: &str,
+    runtime: RuntimeId,
+    role: Option<String>,
+    repo: RepoArg,
+    branch: Option<String>,
+) -> anyhow::Result<(Slug, Slug)> {
     let store = store()?;
     let (team_raw, name) = reference
         .split_once('/')
@@ -91,8 +106,7 @@ pub fn new(
         });
     }
 
-    println!("created agent {team}/{slug} (branch {branch})");
-    Ok(())
+    Ok((team, slug))
 }
 
 pub fn ls(team: Option<&str>) -> anyhow::Result<()> {

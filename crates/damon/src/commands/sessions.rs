@@ -14,6 +14,33 @@ pub fn ls() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub struct KillOutcome {
+    pub killed: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// Kill every live session of team/agent (or unique bare slug).
+pub fn kill_agent(reference: &str) -> anyhow::Result<KillOutcome> {
+    let config = Config::load()?;
+    let tmux = Tmux::new(config.tmux.socket.clone());
+    let store = Store::new(config.root()?);
+    let entry = store.resolve(reference)?;
+    let mut out = KillOutcome {
+        killed: Vec::new(),
+        failed: Vec::new(),
+    };
+    for name in tmux.list()? {
+        if SessionName::parse(&name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+        {
+            match tmux.kill(&name) {
+                Ok(()) => out.killed.push(name),
+                Err(e) => out.failed.push(format!("{name}: {e}")),
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Kill one session by exact name, or every session of team/agent | bare slug.
 pub fn kill(target: &str) -> anyhow::Result<()> {
     let config = Config::load()?;
@@ -23,31 +50,20 @@ pub fn kill(target: &str) -> anyhow::Result<()> {
         println!("killed {target}");
         return Ok(());
     }
-    let store = Store::new(config.root()?);
-    let entry = store.resolve(target)?;
-    let mut killed = 0;
-    let mut failures: Vec<String> = Vec::new();
-    for name in tmux.list()? {
-        if SessionName::parse(&name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
-        {
-            match tmux.kill(&name) {
-                Ok(()) => {
-                    println!("killed {name}");
-                    killed += 1;
-                }
-                Err(e) => failures.push(format!("{name}: {e}")),
-            }
-        }
+    let out = kill_agent(target)?;
+    for name in &out.killed {
+        println!("killed {name}");
     }
-    if !failures.is_empty() {
+    if !out.failed.is_empty() {
         anyhow::bail!(
-            "killed {killed}, failed {}: {}",
-            failures.len(),
-            failures.join("; ")
+            "killed {}, failed {}: {}",
+            out.killed.len(),
+            out.failed.len(),
+            out.failed.join("; ")
         );
     }
-    if killed == 0 {
-        println!("no live sessions for {}/{}", entry.team, entry.slug);
+    if out.killed.is_empty() {
+        println!("no live sessions for {target}");
     }
     Ok(())
 }
