@@ -1,6 +1,9 @@
 use std::io::{IsTerminal, Read};
 
 pub fn set(provider: &str) -> anyhow::Result<()> {
+    if std::env::var("DAMON_NO_KEYRING").is_ok_and(|v| !v.is_empty()) {
+        anyhow::bail!("OS keyring disabled (DAMON_NO_KEYRING is set)");
+    }
     let key = if std::io::stdin().is_terminal() {
         rpassword::prompt_password(format!("key for {provider} (input hidden): "))?
     } else {
@@ -18,7 +21,14 @@ pub fn set(provider: &str) -> anyhow::Result<()> {
 }
 
 pub fn rm(provider: &str) -> anyhow::Result<()> {
-    keyring::Entry::new("damon", provider)?.delete_password()?;
+    if std::env::var("DAMON_NO_KEYRING").is_ok_and(|v| !v.is_empty()) {
+        anyhow::bail!("OS keyring disabled (DAMON_NO_KEYRING is set)");
+    }
+    let entry = keyring::Entry::new("damon", provider)?;
+    entry.delete_password().map_err(|e| match e {
+        keyring::Error::NoEntry => anyhow::anyhow!("no key stored for {provider}"),
+        other => anyhow::anyhow!("keyring error for {provider}: {other}"),
+    })?;
     println!("removed key for {provider}");
     Ok(())
 }
