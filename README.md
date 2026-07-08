@@ -132,6 +132,42 @@ damon sessions
 damon kill <session-name | agent>
 ```
 
+## TUI
+
+```bash
+damon ui
+```
+
+A ratatui screen over the same teams/agents rail as `damon team ls` /
+`damon agent ls`, plus live tmux session state. `damon ui` is **stateless**:
+it re-derives everything from the filesystem and `tmux -L damon
+list-sessions` on a 2s tick (and immediately after any action) — nothing is
+cached, so nothing can drift, same principle as the CLI. Every key below
+calls the same library function its CLI verb uses; there is no parallel
+TUI-only code path. Quitting the TUI (`q`) never kills sessions — it's a
+view, not a supervisor.
+
+| Key | Action |
+|---|---|
+| `↑/↓` / `j/k` | navigate the rail |
+| `Tab` | toggle Sessions / Memory tab |
+| `m` | jump to Memory tab |
+| `n` | model-picker popup (entries from `models.toml`) → spawn new session (same as `damon open --model M --new`) → open terminal |
+| `Enter` | open/attach selected agent (same as `damon open`: reattach highest-`n` live session, else spawn on default model); in Memory tab: preview selected file |
+| `x` | kill with confirm popup; multiple sessions → kill all (same as `damon kill team/agent`), partial failures reported in status line |
+| `N` | new-agent form popup: team (preselected from rail), name, runtime, role, repo source (new / clone URL / worktree path), branch → same function as `damon agent new` |
+| `q` / `Esc` | `Esc` closes the top popup; `q` quits the TUI — sessions keep running |
+
+**`j`/`k` mean different things depending on the active tab:** on the
+Sessions tab they navigate the rail (same as `↑/↓`); on the Memory tab they
+move the memory-preview cursor instead, and `↑/↓` navigate the rail. This
+lets you scroll a memory file without leaving the rail's keyboard model.
+
+Left pane is the rail (teams → agents, live session count badged green when
+> 0); right pane has Sessions (name, model, uptime) and Memory (file list +
+scrollable preview) tabs; the status line shows the last action's result or
+error, using the same error text the CLI prints on failure.
+
 ## Configuration
 
 `~/.config/damon/config.toml` (all keys optional — these are the defaults):
@@ -205,9 +241,11 @@ a complete migration.
 - **M2 (shipped)** — `damon key set/rm` OS-keyring key storage, OpenRouter
   models live in the registry, Codex & OpenCode runtimes, session-end
   reflection via a Claude Code Stop hook.
-- **M3** — ratatui TUI: the team/agent rail, live session badges, memory
-  browser.
-- **M4** — polish: `damon memory --edit`, packaging (Homebrew / AUR).
+- **M3 (shipped)** — ratatui TUI (`damon ui`): the team/agent rail with live
+  session badges, Sessions/Memory tabs, model-picker/kill/new-agent popups.
+  Stateless, 2s refresh, zero clippy warnings workspace-wide.
+- **M4** — `damon memory --edit`, doctor's string-driven tmux gate, `damon
+  memory` command, packaging (Homebrew / AUR).
 
 Design docs live in [docs/superpowers/specs](docs/superpowers/specs) and
 [docs/superpowers/plans](docs/superpowers/plans).

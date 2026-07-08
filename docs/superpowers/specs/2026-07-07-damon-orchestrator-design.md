@@ -315,11 +315,10 @@ Each milestone lands green (fmt, clippy, tests) before the next begins.
 
 ---
 
-## As-built addendum (M1 + M2, 2026-07-08)
+## As-built addendum (M1 + M2 + M3, 2026-07-08)
 
-Authoritative deltas between the approved design above and the shipped code
-at main `0847b9a`. Where this section conflicts with the body, this section
-wins.
+Authoritative deltas between the approved design above and the shipped code.
+Where this section conflicts with the body, this section wins.
 
 ### Layout & config (changed from body)
 
@@ -385,18 +384,110 @@ wins.
   teardown; real git in tempdirs with `GIT_CONFIG_GLOBAL/SYSTEM=/dev/null`;
   keychain never touched by tests (`#[ignore]` for the one real round-trip).
 
+### M3 — Phase 0 deltas (parked debt cleared)
+
+- **`BridgeOutput` replaced the bare `Vec<PathBuf>`** return from
+  `write_bridges` — a struct carrying the written paths plus an optional
+  warning string, so a silently-skipped Stop hook (shell-metachar
+  `damon_exe`) surfaces to `open` instead of vanishing.
+- **`write_atomic`** (damon-core): temp-file-then-rename within the
+  destination directory, used for both `CLAUDE.md` and
+  `.claude/settings.json`. Each file is individually atomic; the *pair*
+  remains non-transactional by design (bridges regenerate on every spawn, so
+  a torn pair heals on next `open`), per the M3 spec.
+- **`classify_entries`** (damon-core `store.rs`): centralizes the
+  read-dir-entry classification used by `slug_dirs` — an unreadable entry
+  becomes a stray (`<unreadable entry: {e}>`) instead of being flattened
+  away by `filter_map`. Never silently hidden, matching the parent spec's
+  validity rules.
+- **`Slug::parse` rejects a trailing `-`.** `Slug::derive` never emitted one,
+  so this closes a validation gap without a compatibility break; regression
+  test added.
+
+### M3 — TUI as shipped
+
+- Module layout landed exactly as designed:
+  `crates/damon/src/tui/{mod,app,view,event,snapshot,popup}.rs`.
+- **`Option<Popup>` on the Model, not a popup stack.** At most one popup is
+  ever open at a time in practice, so the spec's "popup stack" language
+  simplified to `pub popup: Option<Popup>` on `app::Model`; `Esc` clears it.
+- **`j`/`k` are tab-dependent**, not a blanket rail-navigation alias: on the
+  Sessions tab `j`/`k` behave like `↑/↓` (rail navigation); on the Memory
+  tab `j`/`k` move the memory-preview cursor while `↑/↓` still navigate the
+  rail. This is a shipped UX rule, not a bug — it lets you scroll a memory
+  preview without leaving the rail's key model. Documented in the README
+  keys table.
+- **`damon-tmux::Tmux::list_info`** uses `|`, not `\t`, as the
+  `list-sessions -F` field separator (`#{session_name}|#{session_created}`):
+  tmux 3.7b silently rewrites embedded tab bytes in `-F` output to `_`,
+  independently reproduced with `tmux -F $'...\t...'` bypassing shell
+  quoting — indistinguishable from underscores already used in session
+  names (e.g. `damon_team_agent_1`). `|` passes through unmodified. One
+  consequence, documented in code rather than worked around: a foreign
+  (non-damon) tmux session whose name contains `|` is silently dropped from
+  the parsed list; damon-generated names never contain `|`.
+- **`damon-tmux::Tmux::env_var(session, var)`** added alongside `list_info`
+  — reads one variable via `show-environment -t <session> <var>`, `None` on
+  tmux's "unknown variable" exit. The Sessions tab reads the per-session
+  model via `env_var(session, "DAMON_MODEL")` (set at spawn); unknown → the
+  tab renders `"?"` rather than blocking on the lookup.
+- **Command cores are print-free.** The CLI verbs (`team`, `agent`,
+  `open`, `sessions`, `kill`) were split into a library-callable core that
+  returns data/`Result` and a thin CLI wrapper that prints it, so the TUI
+  calls the identical core functions the CLI verbs use — no parallel logic
+  path, matching the spec's statelessness requirement.
+- **`AgentRow` has no `team` field.** It was cut as genuinely dead once the
+  event loop landed — every lookup path threads through `TeamRow.slug`
+  rather than needing the team on the agent row itself.
+- **Stray directories in the rail** render as non-selectable red lines:
+  `{context}: INVALID NAME {name:?}` — Debug-quoting on the name is
+  deliberate, kept specifically to disambiguate whitespace or other
+  non-printing characters in a bad directory name.
+- **Unreadable directory entries** surface as stray names of the form
+  `<unreadable entry: {error}>`, produced by `classify_entries` (see Phase 0
+  above) and rendered through the same stray-line path.
+- **New-agent form validation messages**, verbatim: `"agent name is
+  required"`, `"clone URL is required for source = clone"`, `"repo path is
+  required for source = worktree"`. Role and branch are optional in the
+  form; left empty they fall back to the same defaults `damon agent new`
+  uses on the CLI.
+- **Zero clippy warnings workspace-wide** as of Task 14 (event-loop wiring).
+  Transient `dead_code` allowances during Tasks 9–13, while the TUI was
+  being assembled module-by-module, were accepted as normal mid-milestone
+  noise and are gone by the milestone gate.
+
 ### Parked debt (triaged, non-blocking)
 
-M3: codex-whitespace-path bridge test; non-atomic CLAUDE.md/settings.json
-write pair; shell-metachar exe paths silently disable the hook; `slug_dirs`
-partial-failure edge (read_dir entry errors flattened); Slug::parse accepts
-trailing dash (derive doesn't emit one). M4: doctor's string-driven tmux gate;
-shared `info/exclude` touches the source repo's other worktrees (spec-level
-choice — revisit); `damon memory` command (spec body lists it; deferred).
+M3 phase-0 items (codex-whitespace-path bridge test, non-atomic bridge
+writes, silent hook disable, `slug_dirs` partial-failure edge, `Slug::parse`
+trailing dash) are cleared — see "M3 — Phase 0 deltas" above. Newly parked
+during M3, all non-blocking:
+
+- Tmp-file cleanup on a failed atomic write (`write_atomic` leaves the temp
+  file behind if the rename step fails).
+- No `TestBackend` coverage for the ModelPicker/NewAgent popups or the
+  `REVERSED` selection style — view tests exist for the rail and tabs but
+  not yet for popup rendering.
+- `ensure_selection` doesn't reset the memory-cursor index (`mem_idx`) on
+  rail-selection change — a papercut, not a correctness bug (the cursor
+  just starts mid-list if the previous agent's memory list was longer).
+- Live-session-loop duplication between `load_world` (production tmux path)
+  and the test-fixture loop — same shape, two call sites, not yet unified.
+- Pressing `N` on an empty rail (no teams yet) is a silent no-op instead of
+  giving the user a hint to run `damon team new` first.
+
+M4 (unchanged from M1+M2 addendum, still deferred): doctor's string-driven
+tmux gate; shared `info/exclude` touches the source repo's other worktrees
+(spec-level choice — revisit); `damon memory` command (spec body lists it;
+deferred).
 
 ### Next milestone
 
-**M3 — ratatui TUI** (body's TUI section still accurate as the design):
-teams→agents rail with live session badges, Sessions/Memory tabs, keys
-n/Enter/x/m/N/q, stateless 2s refresh from filesystem + tmux, actions call
-the same functions as the CLI verbs.
+**M4 — polish and packaging:** `damon memory --edit`; doctor's
+string-driven tmux gate; `damon memory` command; packaging (Homebrew /
+AUR); shared `info/exclude` multi-worktree concern revisited. Plus the
+newly parked M3 debt above: tmp-file cleanup on failed atomic writes,
+`TestBackend` coverage for the ModelPicker/NewAgent popups and the
+`REVERSED` style, the `ensure_selection` mem_idx-reset papercut, the
+live-session-loop duplication between `load_world` and tests, and the
+silent no-op when `N` is pressed on an empty rail.
