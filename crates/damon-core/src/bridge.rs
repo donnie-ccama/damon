@@ -348,4 +348,20 @@ mod tests {
         }
         out
     }
+
+    #[test]
+    fn codex_bridge_handles_whitespace_memory_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let memory = tmp.path().join("mem ory");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("AGENT.md"), "agent-content").unwrap();
+        std::fs::write(memory.join("USER.md"), "user-content").unwrap();
+        std::fs::write(memory.join("MEMORY.md"), "memory-content").unwrap();
+        let out = write_bridges(RuntimeId::Codex, "Scout", &memory, tmp.path(), "damon").unwrap();
+        assert_eq!(out.written, vec![tmp.path().join("AGENTS.md")]);
+        assert!(out.warnings.is_empty());
+        let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
+        assert!(contents.contains("agent-content"));
+        assert!(contents.contains("mem ory")); // path is embedded verbatim, not imported
+    }
 }
