@@ -1,5 +1,6 @@
 //! Core types and traits for the damon session manager.
 
+pub mod bridge;
 pub mod config;
 pub mod entity;
 pub mod memory;
