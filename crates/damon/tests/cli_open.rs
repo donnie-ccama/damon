@@ -32,8 +32,13 @@ fn damon(e: &Env) -> Command {
     cmd
 }
 
-fn teardown(e: &Env) {
-    std::process::Command::new("tmux").args(["-L", &e.socket, "kill-server"]).output().ok();
+impl Drop for Env {
+    fn drop(&mut self) {
+        std::process::Command::new("tmux")
+            .args(["-L", &self.socket, "kill-server"])
+            .output()
+            .ok();
+    }
 }
 
 #[test]
@@ -60,7 +65,6 @@ fn open_spawns_session_regenerates_bridge_and_logs() {
 
     damon(&e).args(["kill", "newsletter/scout"]).assert().success();
     damon(&e).args(["sessions"]).assert().success().stdout(contains("scout").not());
-    teardown(&e);
 }
 
 #[test]
@@ -68,5 +72,18 @@ fn open_rejects_unknown_model_and_m2_features() {
     let e = setup("reject");
     damon(&e).args(["open", "scout", "--model", "nope"]).assert().failure().stderr(contains("model"));
     damon(&e).args(["open", "scout", "--model", "kimi"]).assert().failure().stderr(contains("M2"));
-    teardown(&e);
+}
+
+#[test]
+fn open_reattaches_highest_n_numerically() {
+    let e = setup("numeric");
+    for n in ["9", "10"] {
+        std::process::Command::new("tmux")
+            .args(["-L", &e.socket, "new-session", "-d", "-s",
+                   &format!("damon_newsletter_scout_{n}"), "--", "sleep", "30"])
+            .status()
+            .unwrap();
+    }
+    // lexically "damon_newsletter_scout_2"-style ordering would pick _9; numeric must pick _10
+    damon(&e).args(["open", "scout"]).assert().success().stdout(contains("_10"));
 }

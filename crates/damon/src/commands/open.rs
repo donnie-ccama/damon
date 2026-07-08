@@ -51,7 +51,10 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         .collect();
 
     let session = if !new && !mine.is_empty() {
-        mine.iter().max().unwrap().to_string() // most recent = highest n
+        mine.iter()
+            .max_by_key(|s| SessionName::parse(s).map(|n| n.n).unwrap_or(0))
+            .unwrap()
+            .to_string() // most recent = highest n (numeric, not lexical)
     } else {
         // Regenerate bridges from canonical memory before every spawn.
         let worktree = store.worktree_dir(&entry.team, &entry.slug);
@@ -88,7 +91,9 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
             model: key,
             runtime: runtime.as_str(),
         };
-        append_log(&store, &entry.team, &entry.slug, &event)?;
+        if let Err(log_err) = append_log(&store, &entry.team, &entry.slug, &event) {
+            eprintln!("warning: session created but log append failed: {log_err:#}");
+        }
         name
     };
 
