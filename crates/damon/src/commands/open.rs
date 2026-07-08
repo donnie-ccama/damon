@@ -109,23 +109,16 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
     Ok(())
 }
 
-fn resolve_model_env(
-    model_key: &str,
-    name: &str,
-    value: &str,
-) -> anyhow::Result<(String, String)> {
+fn resolve_model_env(model_key: &str, name: &str, value: &str) -> anyhow::Result<(String, String)> {
     if value.starts_with("${") && value.ends_with('}') && value.len() > 3 {
         let inner = &value[2..value.len() - 1];
         if inner.starts_with("keyring:") {
             let account = inner.strip_prefix("keyring:").unwrap_or("");
             return resolve_from_keyring(model_key, name, account);
         }
-        let env_value = std::env::var(inner)
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "model {model_key:?} uses unresolved env var ${inner:?} for {name:?}"
-                )
-            })?;
+        let env_value = std::env::var(inner).map_err(|_| {
+            anyhow::anyhow!("model {model_key:?} uses unresolved env var ${inner:?} for {name:?}")
+        })?;
         return Ok((name.to_string(), env_value));
     }
 
@@ -148,23 +141,20 @@ fn resolve_from_keyring(
         }
     }
 
+    let missing = || {
+        anyhow::anyhow!(
+            "model {model_key:?} needs the {account:?} key for {name:?} — run: damon key set {account}"
+        )
+    };
+
     // Test/CI seam: skip the OS keychain entirely (deterministic missing-key path).
     if std::env::var("DAMON_NO_KEYRING").is_ok_and(|v| !v.is_empty()) {
-        let missing = || {
-            anyhow::anyhow!(
-                "model {model_key:?} needs the {account:?} key for {name:?} — run: damon key set {account}"
-            )
-        };
         return Err(missing());
     }
 
     let entry = Entry::new("damon", account)
         .map_err(|e| anyhow::anyhow!("keyring unavailable for account {account:?}: {e}"))?;
-    let password = entry.get_password().map_err(|_| {
-        anyhow::anyhow!(
-            "model {model_key:?} needs the {account:?} key for {name:?} — run: damon key set {account}"
-        )
-    })?;
+    let password = entry.get_password().map_err(|_| missing())?;
     Ok((name.to_string(), password))
 }
 

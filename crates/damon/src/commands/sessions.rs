@@ -26,13 +26,25 @@ pub fn kill(target: &str) -> anyhow::Result<()> {
     let store = Store::new(config.root()?);
     let entry = store.resolve(target)?;
     let mut killed = 0;
+    let mut failures: Vec<String> = Vec::new();
     for name in tmux.list()? {
         if SessionName::parse(&name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         {
-            tmux.kill(&name)?;
-            println!("killed {name}");
-            killed += 1;
+            match tmux.kill(&name) {
+                Ok(()) => {
+                    println!("killed {name}");
+                    killed += 1;
+                }
+                Err(e) => failures.push(format!("{name}: {e}")),
+            }
         }
+    }
+    if !failures.is_empty() {
+        anyhow::bail!(
+            "killed {killed}, failed {}: {}",
+            failures.len(),
+            failures.join("; ")
+        );
     }
     if killed == 0 {
         println!("no live sessions for {}/{}", entry.team, entry.slug);

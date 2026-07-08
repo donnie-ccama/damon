@@ -8,6 +8,7 @@ fn damon() -> Command {
 #[test]
 fn key_set_rejects_empty_input() {
     damon()
+        .env_remove("DAMON_NO_KEYRING")
         .args(["key", "set", "openrouter"])
         .write_stdin("\n")
         .assert()
@@ -35,8 +36,15 @@ fn key_commands_respect_no_keyring_seam() {
 #[test]
 #[ignore = "touches the real OS keyring; run manually: cargo test -- --ignored"]
 fn key_set_get_rm_round_trip_real_keyring() {
-    damon().args(["key", "set", "damon-selftest"]).write_stdin("v1\n").assert().success();
-    damon().args(["key", "rm", "damon-selftest"]).assert().success();
+    damon()
+        .args(["key", "set", "damon-selftest"])
+        .write_stdin("v1\n")
+        .assert()
+        .success();
+    damon()
+        .args(["key", "rm", "damon-selftest"])
+        .assert()
+        .success();
     // verify second rm fails with friendly error
     damon()
         .args(["key", "rm", "damon-selftest"])

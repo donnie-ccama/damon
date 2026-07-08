@@ -1,5 +1,5 @@
 //! Git operations for damon agents. Shells out to the git CLI.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(thiserror::Error, Debug)]
@@ -8,6 +8,11 @@ pub enum GitError {
     Spawn(#[from] std::io::Error),
     #[error("git {args} failed: {stderr}")]
     Failed { args: String, stderr: String },
+    #[error("filesystem error at {path}: {source}")]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String, GitError> {
@@ -27,7 +32,10 @@ fn git(cwd: Option<&Path>, args: &[&str]) -> Result<String, GitError> {
 }
 
 pub fn init_new(worktree: &Path, branch: &str) -> Result<(), GitError> {
-    std::fs::create_dir_all(worktree).map_err(GitError::Spawn)?;
+    std::fs::create_dir_all(worktree).map_err(|source| GitError::Io {
+        path: worktree.to_path_buf(),
+        source,
+    })?;
     git(Some(worktree), &["init", "-b", branch])?;
     Ok(())
 }
@@ -75,7 +83,10 @@ pub fn exclude(worktree: &Path, entries: &[&str]) -> Result<(), GitError> {
     )?;
     let path = Path::new(&common).join("info").join("exclude");
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(GitError::Spawn)?;
+        std::fs::create_dir_all(parent).map_err(|source| GitError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
     }
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let mut add = String::new();
@@ -91,7 +102,10 @@ pub fn exclude(worktree: &Path, entries: &[&str]) -> Result<(), GitError> {
             text.push('\n');
         }
         text.push_str(&add);
-        std::fs::write(&path, text).map_err(GitError::Spawn)?;
+        std::fs::write(&path, text).map_err(|source| GitError::Io {
+            path: path.clone(),
+            source,
+        })?;
     }
     Ok(())
 }

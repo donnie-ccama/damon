@@ -46,6 +46,7 @@ pub fn new(
             name: name.to_string(),
             role: role.clone(),
             runtime,
+            // These strings are models.toml registry keys, not display names.
             default_model: match runtime {
                 RuntimeId::Claude => "claude",
                 RuntimeId::Codex => "gpt",

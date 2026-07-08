@@ -109,22 +109,22 @@ pub fn write_bridges(
         }
         RuntimeId::Codex => {
             let path = worktree.join("AGENTS.md");
-            std::fs::write(&path, embedded_bridge("Codex", agent_name, memory_dir)).map_err(|e| {
-                CoreError::Io {
+            std::fs::write(&path, embedded_bridge("Codex", agent_name, memory_dir)).map_err(
+                |e| CoreError::Io {
                     path: path.clone(),
                     source: e,
-                }
-            })?;
+                },
+            )?;
             Ok(vec![path])
         }
         RuntimeId::Opencode => {
             let path = worktree.join("AGENTS.md");
-            std::fs::write(&path, embedded_bridge("OpenCode", agent_name, memory_dir)).map_err(|e| {
-                CoreError::Io {
+            std::fs::write(&path, embedded_bridge("OpenCode", agent_name, memory_dir)).map_err(
+                |e| CoreError::Io {
                     path: path.clone(),
                     source: e,
-                }
-            })?;
+                },
+            )?;
             Ok(vec![path])
         }
     }

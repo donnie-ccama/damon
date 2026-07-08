@@ -71,7 +71,15 @@ mod tests {
     #[test]
     fn default_registry_has_default_models() {
         let m: ModelsFile = toml::from_str(DEFAULT_MODELS_TOML).unwrap();
-        for key in ["claude", "gpt", "gpt_openrouter", "kimi", "minimax", "glm", "opencode"] {
+        for key in [
+            "claude",
+            "gpt",
+            "gpt_openrouter",
+            "kimi",
+            "minimax",
+            "glm",
+            "opencode",
+        ] {
             assert!(m.get(key).is_some(), "{key}");
         }
         assert!(m.get("claude").unwrap().env.is_empty());

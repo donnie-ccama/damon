@@ -107,7 +107,14 @@ fn open_opencode_spawns_and_writes_agents_md() {
     let e = setup("opencode");
     // Create an opencode agent
     damon(&e)
-        .args(["agent", "new", "newsletter/opencode", "--runtime", "opencode", "--repo-new"])
+        .args([
+            "agent",
+            "new",
+            "newsletter/opencode",
+            "--runtime",
+            "opencode",
+            "--repo-new",
+        ])
         .assert()
         .success();
 

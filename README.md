@@ -52,7 +52,7 @@ session damon_newsletter_scout_1        ← tmux session, spawned in the agent's
 | git | every agent gets a repo or worktree | yes |
 | tmux ≥ 3.2 | session persistence | yes |
 | [Ghostty](https://ghostty.org) | terminal windows | recommended (any `$TERMINAL` works) |
-| [Claude Code](https://code.claude.com) | the M1 agent runtime | for `damon open` |
+| [Claude Code](https://code.claude.com) | agent runtimes: Claude Code (default), Codex, OpenCode — install the ones you use | for `damon open` |
 | Rust toolchain | building damon | build only |
 
 `damon doctor` checks all of these and tells you exactly what to install.
@@ -149,7 +149,36 @@ launcher = "ghostty"      # ghostty | env-terminal | print
 ```
 
 `~/.config/damon/models.toml` — the model registry. Add a model by adding a
-table; `${keyring:...}` values activate with key storage in M2.
+table; `${keyring:...}` values resolve against OS-keyring-stored keys.
+
+### Provider keys
+
+Models that need an API key reference it as `${keyring:openrouter}` (or
+whatever account name) in `models.toml`. Store the key once:
+
+```bash
+damon key set openrouter     # prompts for the key (hidden input), saves to the OS keyring
+damon key rm openrouter      # remove it
+```
+
+Keys are stored in the OS keyring (Keychain on macOS, Secret Service on
+Linux) under service `damon`, account `<name>`, never written to disk by
+damon itself.
+
+**Escape hatch:** set `DAMON_KEY_<ACCOUNT>` (uppercased, `-`/`.` → `_`) to
+bypass the keyring entirely — useful for CI or containers where no keyring
+is available, e.g. `DAMON_KEY_OPENROUTER=sk-...`.
+
+**`DAMON_NO_KEYRING`** — set (to any non-empty value) to disable keyring
+access altogether; `damon key set/rm` and any model needing a keyring key
+will fail with a clear error instead of touching the OS keychain.
+
+**Threat model:** a resolved key reaches the agent's session as an
+environment variable passed to `tmux -e` when the session is spawned. This
+is same-user-only (another user on the machine cannot read another user's
+tmux server) and the key is only transiently visible in argv of the
+short-lived `tmux` client process that sets up the session — it is never
+written to a file, log, or shell history by damon.
 
 ## Data layout
 
@@ -172,8 +201,9 @@ a complete migration.
   scaffolding + CLAUDE.md bridge, tmux sessions, Ghostty launch, doctor.
   Claude Code is the active runtime. 65 tests, real-git/real-tmux
   integration coverage, verified end-to-end on macOS.
-- **M2** — OpenRouter models with OS-keyring key storage, Codex & OpenCode
-  runtimes, session-end reflection hook.
+- **M2 (shipped)** — `damon key set/rm` OS-keyring key storage, OpenRouter
+  models live in the registry, Codex & OpenCode runtimes, session-end
+  reflection via a Claude Code Stop hook.
 - **M3** — ratatui TUI: the team/agent rail, live session badges, memory
   browser.
 - **M4** — polish: `damon memory --edit`, packaging (Homebrew / AUR).

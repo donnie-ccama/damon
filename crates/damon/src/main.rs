@@ -29,7 +29,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AgentCmd,
     },
-    /// Store a provider API key in the OS keyring
+    /// Manage provider API keys (OS keyring)
     Key {
         #[command(subcommand)]
         cmd: KeyCmd,
