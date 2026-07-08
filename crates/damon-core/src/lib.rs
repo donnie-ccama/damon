@@ -5,6 +5,7 @@ pub mod entity;
 pub mod models;
 pub mod session_name;
 pub mod slug;
+pub mod store;
 
 use std::path::PathBuf;
 
