@@ -3,7 +3,11 @@ mod commands;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "damon", version, about = "Orchestrator for persistent coding agents")]
+#[command(
+    name = "damon",
+    version,
+    about = "Orchestrator for persistent coding agents"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -109,7 +113,15 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
             TeamCmd::Rm { slug, force } => commands::team::rm(&slug, force),
         },
         Cmd::Agent { cmd } => match cmd {
-            AgentCmd::New { reference, runtime, role, repo_new, repo_clone, repo_worktree, branch } => {
+            AgentCmd::New {
+                reference,
+                runtime,
+                role,
+                repo_new,
+                repo_clone,
+                repo_worktree,
+                branch,
+            } => {
                 let repo = if repo_new {
                     commands::agent::RepoArg::New
                 } else if let Some(url) = repo_clone {
@@ -124,7 +136,11 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
             AgentCmd::Ls { team } => commands::agent::ls(team.as_deref()),
             AgentCmd::Rm { reference, yes } => commands::agent::rm(&reference, yes),
         },
-        Cmd::Open { reference, model, new } => commands::open::run(&reference, model.as_deref(), new),
+        Cmd::Open {
+            reference,
+            model,
+            new,
+        } => commands::open::run(&reference, model.as_deref(), new),
         Cmd::Sessions => commands::sessions::ls(),
         Cmd::Kill { target } => commands::sessions::kill(&target),
     }

@@ -14,7 +14,10 @@ use std::path::PathBuf;
 #[derive(thiserror::Error, Debug)]
 pub enum CoreError {
     #[error("io error at {path}: {source}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("invalid TOML at {path}: {msg}")]
     Toml { path: PathBuf, msg: String },
     #[error("not found: {0}")]

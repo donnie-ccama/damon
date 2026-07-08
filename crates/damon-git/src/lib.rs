@@ -42,7 +42,12 @@ pub fn worktree_add(existing_repo: &Path, worktree: &Path, branch: &str) -> Resu
     let wt = worktree.to_string_lossy();
     let branch_exists = git(
         Some(existing_repo),
-        &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")],
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
     )
     .is_ok();
     if branch_exists {
@@ -54,7 +59,10 @@ pub fn worktree_add(existing_repo: &Path, worktree: &Path, branch: &str) -> Resu
 }
 
 pub fn worktree_remove(existing_repo: &Path, worktree: &Path) -> Result<(), GitError> {
-    git(Some(existing_repo), &["worktree", "remove", "--force", &worktree.to_string_lossy()])?;
+    git(
+        Some(existing_repo),
+        &["worktree", "remove", "--force", &worktree.to_string_lossy()],
+    )?;
     Ok(())
 }
 

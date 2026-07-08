@@ -53,7 +53,12 @@ pub fn new(
             }
             .to_string(),
         },
-        repo: RepoSection { source, url, path, branch: branch.clone() },
+        repo: RepoSection {
+            source,
+            url,
+            path,
+            branch: branch.clone(),
+        },
     };
     file.validate()?;
 
@@ -115,7 +120,9 @@ pub fn rm(reference: &str, yes: bool) -> anyhow::Result<()> {
             if let Some(project) = &file.repo.path {
                 let wt = store.worktree_dir(&entry.team, &entry.slug);
                 if let Err(e) = damon_git::worktree_remove(&expand_tilde(project), &wt) {
-                    eprintln!("warning: git worktree remove failed ({e}); deleting directory anyway");
+                    eprintln!(
+                        "warning: git worktree remove failed ({e}); deleting directory anyway"
+                    );
                 }
             }
         }

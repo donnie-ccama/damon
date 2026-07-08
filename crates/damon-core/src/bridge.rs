@@ -25,7 +25,11 @@ pub fn write_bridges(
     memory_dir: &Path,
     worktree: &Path,
 ) -> Result<Vec<PathBuf>, CoreError> {
-    if memory_dir.to_string_lossy().chars().any(char::is_whitespace) {
+    if memory_dir
+        .to_string_lossy()
+        .chars()
+        .any(char::is_whitespace)
+    {
         return Err(CoreError::Invalid(format!(
             "memory path {:?} contains whitespace; Claude Code @imports cannot express it — use a data root without spaces",
             memory_dir
@@ -34,8 +38,12 @@ pub fn write_bridges(
     match runtime {
         RuntimeId::Claude => {
             let path = worktree.join("CLAUDE.md");
-            std::fs::write(&path, claude_bridge(agent_name, memory_dir))
-                .map_err(|e| CoreError::Io { path: path.clone(), source: e })?;
+            std::fs::write(&path, claude_bridge(agent_name, memory_dir)).map_err(|e| {
+                CoreError::Io {
+                    path: path.clone(),
+                    source: e,
+                }
+            })?;
             Ok(vec![path])
         }
         other => Err(CoreError::Invalid(format!(
@@ -63,8 +71,13 @@ mod tests {
     #[test]
     fn write_bridges_creates_claude_md_and_lists_it() {
         let tmp = tempfile::tempdir().unwrap();
-        let written =
-            write_bridges(RuntimeId::Claude, "Scout", std::path::Path::new("/mem"), tmp.path()).unwrap();
+        let written = write_bridges(
+            RuntimeId::Claude,
+            "Scout",
+            std::path::Path::new("/mem"),
+            tmp.path(),
+        )
+        .unwrap();
         assert_eq!(written, vec![tmp.path().join("CLAUDE.md")]);
         assert!(tmp.path().join("CLAUDE.md").exists());
     }
@@ -72,14 +85,24 @@ mod tests {
     #[test]
     fn other_runtimes_fail_until_m2() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = write_bridges(RuntimeId::Codex, "S", std::path::Path::new("/m"), tmp.path());
+        let err = write_bridges(
+            RuntimeId::Codex,
+            "S",
+            std::path::Path::new("/m"),
+            tmp.path(),
+        );
         assert!(err.unwrap_err().to_string().contains("M2"));
     }
 
     #[test]
     fn write_bridges_rejects_whitespace_memory_path() {
         let tmp = tempfile::tempdir().unwrap();
-        let err = write_bridges(RuntimeId::Claude, "S", std::path::Path::new("/me m"), tmp.path());
+        let err = write_bridges(
+            RuntimeId::Claude,
+            "S",
+            std::path::Path::new("/me m"),
+            tmp.path(),
+        );
         assert!(err.unwrap_err().to_string().contains("whitespace"));
     }
 }

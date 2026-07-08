@@ -21,7 +21,10 @@ pub fn run() -> anyhow::Result<()> {
     let mut required_missing = Vec::new();
 
     let git_ok = found("git", "--version");
-    println!("git      {}", if git_ok { "ok".into() } else { hint("git") });
+    println!(
+        "git      {}",
+        if git_ok { "ok".into() } else { hint("git") }
+    );
     if !git_ok {
         required_missing.push("git");
     }
@@ -38,14 +41,17 @@ pub fn run() -> anyhow::Result<()> {
 
     // Ghostty: app-bundle check on macOS; PATH lookup on Linux.
     let ghostty_ok = if cfg!(target_os = "macos") {
-        std::path::Path::new("/Applications/Ghostty.app").exists()
-            || found("ghostty", "--version")
+        std::path::Path::new("/Applications/Ghostty.app").exists() || found("ghostty", "--version")
     } else {
         found("ghostty", "--version")
     };
     println!(
         "ghostty  {}",
-        if ghostty_ok { "ok".into() } else { format!("{} (or use launcher = \"env-terminal\")", hint("ghostty")) }
+        if ghostty_ok {
+            "ok".into()
+        } else {
+            format!("{} (or use launcher = \"env-terminal\")", hint("ghostty"))
+        }
     );
 
     for rt in [RuntimeId::Claude, RuntimeId::Codex, RuntimeId::Opencode] {
@@ -54,7 +60,11 @@ pub fn run() -> anyhow::Result<()> {
         println!(
             "{:<8} {}",
             rt.as_str(),
-            if ok { "ok".to_string() } else { format!("not found ({bin}) — optional until you use it") }
+            if ok {
+                "ok".to_string()
+            } else {
+                format!("not found ({bin}) — optional until you use it")
+            }
         );
     }
 

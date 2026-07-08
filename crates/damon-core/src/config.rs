@@ -18,7 +18,10 @@ pub struct General {
 
 impl Default for General {
     fn default() -> Self {
-        General { root: "~/damon".into(), default_runtime: "claude".into() }
+        General {
+            root: "~/damon".into(),
+            default_runtime: "claude".into(),
+        }
     }
 }
 
@@ -30,7 +33,9 @@ pub struct TmuxCfg {
 
 impl Default for TmuxCfg {
     fn default() -> Self {
-        TmuxCfg { socket: "damon".into() }
+        TmuxCfg {
+            socket: "damon".into(),
+        }
     }
 }
 
@@ -42,7 +47,9 @@ pub struct TerminalCfg {
 
 impl Default for TerminalCfg {
     fn default() -> Self {
-        TerminalCfg { launcher: Launcher::Ghostty }
+        TerminalCfg {
+            launcher: Launcher::Ghostty,
+        }
     }
 }
 
@@ -99,7 +106,10 @@ pub(crate) fn load_toml_or_default<T: serde::de::DeserializeOwned + Default>(
             msg: e.to_string(),
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
-        Err(e) => Err(CoreError::Io { path: path.to_path_buf(), source: e }),
+        Err(e) => Err(CoreError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        }),
     }
 }
 

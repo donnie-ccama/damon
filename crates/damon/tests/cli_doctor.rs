@@ -17,7 +17,11 @@ fn doctor_fails_with_hints_when_required_tools_missing() {
         .env("PATH", "") // nothing findable
         .assert()
         .failure()
-        .stdout(contains("git").and(contains("tmux")).and(contains("install")));
+        .stdout(
+            contains("git")
+                .and(contains("tmux"))
+                .and(contains("install")),
+        );
 }
 
 #[test]

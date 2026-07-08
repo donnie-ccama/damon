@@ -6,7 +6,9 @@ pub trait TerminalLauncher {
 }
 
 pub fn attach_command(socket: &str, session: &str) -> Vec<String> {
-    ["tmux", "-L", socket, "attach", "-t", session].map(String::from).to_vec()
+    ["tmux", "-L", socket, "attach", "-t", session]
+        .map(String::from)
+        .to_vec()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,8 +32,9 @@ pub fn ghostty_invocation(os: Os, socket: &str, session: &str) -> (String, Vec<S
     let attach = attach_command(socket, session);
     match os {
         Os::MacOs => {
-            let mut args: Vec<String> =
-                ["-na", "Ghostty", "--args", "-e"].map(String::from).to_vec();
+            let mut args: Vec<String> = ["-na", "Ghostty", "--args", "-e"]
+                .map(String::from)
+                .to_vec();
             args.extend(attach);
             ("open".to_string(), args)
         }
@@ -80,7 +83,10 @@ pub struct PrintLauncher {
 
 impl TerminalLauncher for PrintLauncher {
     fn open(&self, session: &str, _title: &str) -> anyhow::Result<()> {
-        println!("attach with: {}", attach_command(&self.socket, session).join(" "));
+        println!(
+            "attach with: {}",
+            attach_command(&self.socket, session).join(" ")
+        );
         Ok(())
     }
 }
@@ -113,8 +119,23 @@ mod tests {
     fn ghostty_invocation_per_os() {
         let (bin, args) = ghostty_invocation(Os::MacOs, "damon", "s1");
         assert_eq!(bin, "open");
-        assert_eq!(args[..4], ["-na".to_string(), "Ghostty".to_string(), "--args".to_string(), "-e".to_string()]);
-        assert!(args.ends_with(&["tmux".into(), "-L".into(), "damon".into(), "attach".into(), "-t".into(), "s1".into()]));
+        assert_eq!(
+            args[..4],
+            [
+                "-na".to_string(),
+                "Ghostty".to_string(),
+                "--args".to_string(),
+                "-e".to_string()
+            ]
+        );
+        assert!(args.ends_with(&[
+            "tmux".into(),
+            "-L".into(),
+            "damon".into(),
+            "attach".into(),
+            "-t".into(),
+            "s1".into()
+        ]));
 
         let (bin, args) = ghostty_invocation(Os::Linux, "damon", "s1");
         assert_eq!(bin, "ghostty");
@@ -123,6 +144,10 @@ mod tests {
 
     #[test]
     fn print_launcher_never_fails() {
-        PrintLauncher { socket: "damon".into() }.open("s1", "title").unwrap();
+        PrintLauncher {
+            socket: "damon".into(),
+        }
+        .open("s1", "title")
+        .unwrap();
     }
 }

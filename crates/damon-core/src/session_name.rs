@@ -35,7 +35,11 @@ impl SessionName {
             .map(|s| s.n)
             .collect();
         let n = (1..).find(|i| !taken.contains(i)).unwrap();
-        SessionName { team: team.clone(), agent: agent.clone(), n }
+        SessionName {
+            team: team.clone(),
+            agent: agent.clone(),
+            n,
+        }
     }
 }
 
@@ -49,14 +53,24 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        let n = SessionName { team: s("newsletter"), agent: s("scout"), n: 3 };
+        let n = SessionName {
+            team: s("newsletter"),
+            agent: s("scout"),
+            n: 3,
+        };
         assert_eq!(n.encode(), "damon_newsletter_scout_3");
         assert_eq!(SessionName::parse("damon_newsletter_scout_3").unwrap(), n);
     }
 
     #[test]
     fn rejects_foreign_names() {
-        for bad in ["other_newsletter_scout_1", "damon_a_b", "damon_a_b_c_d", "damon_A_b_1", "damon_a_b_x"] {
+        for bad in [
+            "other_newsletter_scout_1",
+            "damon_a_b",
+            "damon_a_b_c_d",
+            "damon_A_b_1",
+            "damon_a_b_x",
+        ] {
             assert!(SessionName::parse(bad).is_none(), "{bad}");
         }
     }
@@ -68,7 +82,13 @@ mod tests {
             "damon_newsletter_scout_3".to_string(),
             "damon_newsletter_other_2".to_string(),
         ];
-        assert_eq!(SessionName::next_free(&s("newsletter"), &s("scout"), &live).n, 2);
-        assert_eq!(SessionName::next_free(&s("newsletter"), &s("fresh"), &live).n, 1);
+        assert_eq!(
+            SessionName::next_free(&s("newsletter"), &s("scout"), &live).n,
+            2
+        );
+        assert_eq!(
+            SessionName::next_free(&s("newsletter"), &s("fresh"), &live).n,
+            1
+        );
     }
 }

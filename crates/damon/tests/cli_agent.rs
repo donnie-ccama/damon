@@ -9,16 +9,32 @@ fn damon(root: &Path, cfg: &Path) -> Command {
 }
 
 fn git(cwd: &Path, args: &[&str]) {
-    assert!(std::process::Command::new("git").args(args).current_dir(cwd).output().unwrap().status.success());
+    assert!(std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap()
+        .status
+        .success());
 }
 
 #[test]
 fn agent_new_repo_new_scaffolds_everything() {
     let root = tempfile::tempdir().unwrap();
     let cfg = tempfile::tempdir().unwrap();
-    damon(root.path(), cfg.path()).args(["team", "new", "Newsletter"]).assert().success();
     damon(root.path(), cfg.path())
-        .args(["agent", "new", "newsletter/Scout", "--role", "Researches topics", "--repo-new"])
+        .args(["team", "new", "Newsletter"])
+        .assert()
+        .success();
+    damon(root.path(), cfg.path())
+        .args([
+            "agent",
+            "new",
+            "newsletter/Scout",
+            "--role",
+            "Researches topics",
+            "--repo-new",
+        ])
         .assert()
         .success();
     let agent = root.path().join("teams/newsletter/agents/scout");
@@ -31,7 +47,11 @@ fn agent_new_repo_new_scaffolds_everything() {
     assert!(toml.contains("source = \"new\""));
     assert!(toml.contains("branch = \"agent/scout\""));
 
-    damon(root.path(), cfg.path()).args(["agent", "ls"]).assert().success().stdout(contains("newsletter/scout"));
+    damon(root.path(), cfg.path())
+        .args(["agent", "ls"])
+        .assert()
+        .success()
+        .stdout(contains("newsletter/scout"));
 }
 
 #[test]
@@ -46,16 +66,28 @@ fn agent_new_worktree_attaches_to_existing_repo() {
     git(project.path(), &["add", "-A"]);
     git(project.path(), &["commit", "-m", "seed"]);
 
-    damon(root.path(), cfg.path()).args(["team", "new", "Web"]).assert().success();
     damon(root.path(), cfg.path())
-        .args(["agent", "new", "web/Fixer", "--repo-worktree", project.path().to_str().unwrap()])
+        .args(["team", "new", "Web"])
+        .assert()
+        .success();
+    damon(root.path(), cfg.path())
+        .args([
+            "agent",
+            "new",
+            "web/Fixer",
+            "--repo-worktree",
+            project.path().to_str().unwrap(),
+        ])
         .assert()
         .success();
     let wt = root.path().join("teams/web/agents/fixer/worktree");
     assert!(wt.join("README.md").exists());
 
     // rm detaches the worktree from the project repo
-    damon(root.path(), cfg.path()).args(["agent", "rm", "web/fixer", "--yes"]).assert().success();
+    damon(root.path(), cfg.path())
+        .args(["agent", "rm", "web/fixer", "--yes"])
+        .assert()
+        .success();
     assert!(!wt.exists());
 }
 
@@ -63,19 +95,34 @@ fn agent_new_worktree_attaches_to_existing_repo() {
 fn agent_new_requires_team_and_repo_flag() {
     let root = tempfile::tempdir().unwrap();
     let cfg = tempfile::tempdir().unwrap();
-    damon(root.path(), cfg.path()).args(["agent", "new", "ghost/Scout", "--repo-new"]).assert().failure().stderr(contains("team"));
+    damon(root.path(), cfg.path())
+        .args(["agent", "new", "ghost/Scout", "--repo-new"])
+        .assert()
+        .failure()
+        .stderr(contains("team"));
 }
 
 #[test]
 fn agent_new_codex_runtime_gets_matching_default_model() {
     let root = tempfile::tempdir().unwrap();
     let cfg = tempfile::tempdir().unwrap();
-    damon(root.path(), cfg.path()).args(["team", "new", "Mixed"]).assert().success();
     damon(root.path(), cfg.path())
-        .args(["agent", "new", "mixed/Coder", "--runtime", "codex", "--repo-new"])
+        .args(["team", "new", "Mixed"])
         .assert()
         .success();
-    let toml = std::fs::read_to_string(root.path().join("teams/mixed/agents/coder/agent.toml")).unwrap();
+    damon(root.path(), cfg.path())
+        .args([
+            "agent",
+            "new",
+            "mixed/Coder",
+            "--runtime",
+            "codex",
+            "--repo-new",
+        ])
+        .assert()
+        .success();
+    let toml =
+        std::fs::read_to_string(root.path().join("teams/mixed/agents/coder/agent.toml")).unwrap();
     assert!(toml.contains("runtime = \"codex\""));
     assert!(toml.contains("default_model = \"gpt\""));
 }

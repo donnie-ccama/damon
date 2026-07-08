@@ -10,8 +10,16 @@ fn isolate_git() {
 }
 
 fn git(cwd: &Path, args: &[&str]) -> String {
-    let out = Command::new("git").args(args).current_dir(cwd).output().unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -92,7 +100,10 @@ fn exclude_appends_once_to_common_dir() {
     damon_git::worktree_add(&origin, &wt, "agent/scout").unwrap();
     damon_git::exclude(&wt, &["CLAUDE.md"]).unwrap();
     damon_git::exclude(&wt, &["CLAUDE.md"]).unwrap(); // idempotent
-    let common = git(&wt, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    let common = git(
+        &wt,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
     let text = std::fs::read_to_string(Path::new(&common).join("info/exclude")).unwrap();
     assert_eq!(text.matches("CLAUDE.md").count(), 1);
     assert_eq!(git(&wt, &["status", "--porcelain"]), ""); // bridge file invisible

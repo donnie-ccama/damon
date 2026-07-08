@@ -31,7 +31,10 @@ pub fn rm(slug: &str, force: bool) -> anyhow::Result<()> {
     }
     let agents = store.agents(&slug)?;
     if !agents.is_empty() && !force {
-        anyhow::bail!("team {slug} has {} agent(s); pass --force to delete anyway", agents.len());
+        anyhow::bail!(
+            "team {slug} has {} agent(s); pass --force to delete anyway",
+            agents.len()
+        );
     }
     std::fs::remove_dir_all(&dir)?;
     println!("removed team {slug}");

@@ -45,8 +45,7 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
     let mine: Vec<&String> = live
         .iter()
         .filter(|s| {
-            SessionName::parse(s)
-                .is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+            SessionName::parse(s).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         })
         .collect();
 
@@ -65,7 +64,10 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
             .filter_map(|p| p.strip_prefix(&worktree).ok())
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
-        damon_git::exclude(&worktree, &names.iter().map(String::as_str).collect::<Vec<_>>())?;
+        damon_git::exclude(
+            &worktree,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        )?;
 
         let name = SessionName::next_free(&entry.team, &entry.slug, &live).encode();
         let mut env: BTreeMap<String, String> = model.env.clone();

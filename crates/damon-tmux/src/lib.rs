@@ -27,7 +27,11 @@ impl Tmux {
     }
 
     fn run(&self, args: &[String]) -> Result<String, TmuxError> {
-        let out = Command::new("tmux").arg("-L").arg(&self.socket).args(args).output()?;
+        let out = Command::new("tmux")
+            .arg("-L")
+            .arg(&self.socket)
+            .args(args)
+            .output()?;
         if !out.status.success() {
             return Err(TmuxError::Failed {
                 args: args.join(" "),
@@ -65,8 +69,11 @@ impl Tmux {
     }
 
     pub fn list(&self) -> Result<Vec<String>, TmuxError> {
-        let args: Vec<String> =
-            vec!["list-sessions".into(), "-F".into(), "#{session_name}".into()];
+        let args: Vec<String> = vec![
+            "list-sessions".into(),
+            "-F".into(),
+            "#{session_name}".into(),
+        ];
         match self.run(&args) {
             Ok(out) => Ok(out.lines().map(str::to_string).collect()),
             // No server on this socket yet = no sessions.
@@ -84,12 +91,12 @@ impl Tmux {
     }
 
     pub fn kill(&self, name: &str) -> Result<(), TmuxError> {
-        self.run(&vec!["kill-session".into(), "-t".into(), name.into()])?;
+        self.run(&["kill-session".into(), "-t".into(), name.into()])?;
         Ok(())
     }
 
     pub fn kill_server(&self) -> Result<(), TmuxError> {
-        self.run(&vec!["kill-server".into()])?;
+        self.run(&["kill-server".into()])?;
         Ok(())
     }
 }
@@ -99,7 +106,10 @@ pub fn version() -> Result<(u32, u32), TmuxError> {
     let out = Command::new("tmux").arg("-V").output()?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let num = text.split_whitespace().last().unwrap_or_default();
-    let cleaned: String = num.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+    let cleaned: String = num
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
     let mut parts = cleaned.split('.');
     let major = parts.next().and_then(|p| p.parse().ok());
     let minor = parts.next().and_then(|p| p.parse().ok());

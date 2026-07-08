@@ -27,8 +27,7 @@ pub fn kill(target: &str) -> anyhow::Result<()> {
     let entry = store.resolve(target)?;
     let mut killed = 0;
     for name in tmux.list()? {
-        if SessionName::parse(&name)
-            .is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+        if SessionName::parse(&name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         {
             tmux.kill(&name)?;
             println!("killed {name}");

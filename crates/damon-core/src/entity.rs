@@ -67,12 +67,12 @@ pub enum RepoSource {
 impl AgentFile {
     pub fn validate(&self) -> Result<(), CoreError> {
         match self.repo.source {
-            RepoSource::Clone if self.repo.url.is_none() => {
-                Err(CoreError::Invalid("repo.source = \"clone\" requires repo.url".into()))
-            }
-            RepoSource::Worktree if self.repo.path.is_none() => {
-                Err(CoreError::Invalid("repo.source = \"worktree\" requires repo.path".into()))
-            }
+            RepoSource::Clone if self.repo.url.is_none() => Err(CoreError::Invalid(
+                "repo.source = \"clone\" requires repo.url".into(),
+            )),
+            RepoSource::Worktree if self.repo.path.is_none() => Err(CoreError::Invalid(
+                "repo.source = \"worktree\" requires repo.path".into(),
+            )),
             _ => Ok(()),
         }
     }
@@ -90,8 +90,10 @@ mod tests {
 
     #[test]
     fn parses_full_agent_file() {
-        let a: AgentFile =
-            toml::from_str(&agent_toml("source = \"worktree\"\npath = \"~/Projects/site\"")).unwrap();
+        let a: AgentFile = toml::from_str(&agent_toml(
+            "source = \"worktree\"\npath = \"~/Projects/site\"",
+        ))
+        .unwrap();
         assert_eq!(a.agent.name, "Scout");
         assert_eq!(a.agent.runtime, RuntimeId::Claude);
         assert_eq!(a.repo.source, RepoSource::Worktree);
@@ -126,7 +128,10 @@ mod tests {
 
     #[test]
     fn team_file_round_trips() {
-        let t = TeamFile { name: "Newsletter".into(), created: chrono::Utc::now() };
+        let t = TeamFile {
+            name: "Newsletter".into(),
+            created: chrono::Utc::now(),
+        };
         let back: TeamFile = toml::from_str(&toml::to_string(&t).unwrap()).unwrap();
         assert_eq!(back.name, "Newsletter");
     }

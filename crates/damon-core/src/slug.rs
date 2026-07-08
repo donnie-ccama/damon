@@ -68,7 +68,10 @@ mod tests {
 
     #[test]
     fn derives_kebab_case() {
-        assert_eq!(Slug::derive("Newsletter Team").unwrap().as_str(), "newsletter-team");
+        assert_eq!(
+            Slug::derive("Newsletter Team").unwrap().as_str(),
+            "newsletter-team"
+        );
         assert_eq!(Slug::derive("Scout").unwrap().as_str(), "scout");
         assert_eq!(Slug::derive("a  b!!c").unwrap().as_str(), "a-b-c");
     }
@@ -91,9 +94,9 @@ mod tests {
     fn parse_validates() {
         assert!(Slug::parse("scout").is_ok());
         assert!(Slug::parse("scout-2").is_ok());
-        assert!(Slug::parse("Scout").is_err());     // uppercase
-        assert!(Slug::parse("bad_name").is_err());  // underscore reserved for session names
-        assert!(Slug::parse("-lead").is_err());     // must start alphanumeric
+        assert!(Slug::parse("Scout").is_err()); // uppercase
+        assert!(Slug::parse("bad_name").is_err()); // underscore reserved for session names
+        assert!(Slug::parse("-lead").is_err()); // must start alphanumeric
         assert!(Slug::parse(&"a".repeat(33)).is_err());
     }
 

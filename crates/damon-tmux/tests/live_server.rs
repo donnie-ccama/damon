@@ -19,7 +19,10 @@ fn spawn_list_kill_lifecycle() {
     )
     .unwrap();
     assert!(t.has("damon_newsletter_scout_1").unwrap());
-    assert_eq!(t.list().unwrap(), vec!["damon_newsletter_scout_1".to_string()]);
+    assert_eq!(
+        t.list().unwrap(),
+        vec!["damon_newsletter_scout_1".to_string()]
+    );
     t.kill("damon_newsletter_scout_1").unwrap();
     assert!(!t.has("damon_newsletter_scout_1").unwrap());
     t.kill_server().ok();
