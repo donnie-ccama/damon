@@ -5,6 +5,7 @@ use std::io::IsTerminal;
 pub mod app;
 pub mod popup;
 pub mod snapshot;
+pub mod view;
 
 pub fn run() -> anyhow::Result<()> {
     if !std::io::stdout().is_terminal() {
