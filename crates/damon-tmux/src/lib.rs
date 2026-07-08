@@ -1,1 +1,110 @@
-//! Tmux session integration for damon.
+//! tmux wrapper on a dedicated socket (`tmux -L <socket>`).
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::process::Command;
+
+#[derive(thiserror::Error, Debug)]
+pub enum TmuxError {
+    #[error("failed to run tmux: {0}")]
+    Spawn(#[from] std::io::Error),
+    #[error("tmux {args} failed: {stderr}")]
+    Failed { args: String, stderr: String },
+    #[error("cannot parse tmux version from {0:?}")]
+    Version(String),
+}
+
+pub struct Tmux {
+    socket: String,
+}
+
+impl Tmux {
+    pub fn new(socket: String) -> Tmux {
+        Tmux { socket }
+    }
+
+    pub fn socket(&self) -> &str {
+        &self.socket
+    }
+
+    fn run(&self, args: &[String]) -> Result<String, TmuxError> {
+        let out = Command::new("tmux").arg("-L").arg(&self.socket).args(args).output()?;
+        if !out.status.success() {
+            return Err(TmuxError::Failed {
+                args: args.join(" "),
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            });
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
+    /// `new-session -d -s <name> -c <cwd> [-e K=V]... -- command...`
+    /// Env goes via `-e` (tmux >= 3.2) so secrets never hit a shell rc or disk.
+    pub fn spawn(
+        &self,
+        name: &str,
+        cwd: &Path,
+        env: &BTreeMap<String, String>,
+        command: &[String],
+    ) -> Result<(), TmuxError> {
+        let mut args: Vec<String> = vec![
+            "new-session".into(),
+            "-d".into(),
+            "-s".into(),
+            name.into(),
+            "-c".into(),
+            cwd.to_string_lossy().into_owned(),
+        ];
+        for (k, v) in env {
+            args.push("-e".into());
+            args.push(format!("{k}={v}"));
+        }
+        args.push("--".into());
+        args.extend(command.iter().cloned());
+        self.run(&args)?;
+        Ok(())
+    }
+
+    pub fn list(&self) -> Result<Vec<String>, TmuxError> {
+        let args: Vec<String> =
+            vec!["list-sessions".into(), "-F".into(), "#{session_name}".into()];
+        match self.run(&args) {
+            Ok(out) => Ok(out.lines().map(str::to_string).collect()),
+            // No server on this socket yet = no sessions.
+            Err(TmuxError::Failed { stderr, .. })
+                if stderr.contains("no server running") || stderr.contains("No such file") =>
+            {
+                Ok(Vec::new())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn has(&self, name: &str) -> Result<bool, TmuxError> {
+        Ok(self.list()?.iter().any(|s| s == name))
+    }
+
+    pub fn kill(&self, name: &str) -> Result<(), TmuxError> {
+        self.run(&vec!["kill-session".into(), "-t".into(), name.into()])?;
+        Ok(())
+    }
+
+    pub fn kill_server(&self) -> Result<(), TmuxError> {
+        self.run(&vec!["kill-server".into()])?;
+        Ok(())
+    }
+}
+
+/// Parse `tmux -V` (e.g. "tmux 3.4", "tmux 3.3a") into (major, minor).
+pub fn version() -> Result<(u32, u32), TmuxError> {
+    let out = Command::new("tmux").arg("-V").output()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let num = text.split_whitespace().last().unwrap_or_default();
+    let cleaned: String = num.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect();
+    let mut parts = cleaned.split('.');
+    let major = parts.next().and_then(|p| p.parse().ok());
+    let minor = parts.next().and_then(|p| p.parse().ok());
+    match (major, minor) {
+        (Some(ma), Some(mi)) => Ok((ma, mi)),
+        _ => Err(TmuxError::Version(text)),
+    }
+}
