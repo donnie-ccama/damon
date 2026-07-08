@@ -46,7 +46,12 @@ pub fn new(
             name: name.to_string(),
             role: role.clone(),
             runtime,
-            default_model: "claude".to_string(),
+            default_model: match runtime {
+                RuntimeId::Claude => "claude",
+                RuntimeId::Codex => "gpt",
+                RuntimeId::Opencode => "opencode",
+            }
+            .to_string(),
         },
         repo: RepoSection { source, url, path, branch: branch.clone() },
     };
@@ -64,8 +69,14 @@ pub fn new(
         RepoArg::Worktree(p) => damon_git::worktree_add(&expand_tilde(p), &worktree, &branch),
     };
     if let Err(e) = repo_result {
-        std::fs::remove_dir_all(&dir).ok();
-        return Err(anyhow::anyhow!("repo setup failed, rolled back agent dir: {e}"));
+        let cleanup = std::fs::remove_dir_all(&dir);
+        return Err(match cleanup {
+            Ok(()) => anyhow::anyhow!("repo setup failed, rolled back agent dir: {e}"),
+            Err(rm) => anyhow::anyhow!(
+                "repo setup failed: {e}; cleanup of {} also failed ({rm}) — remove it manually",
+                dir.display()
+            ),
+        });
     }
 
     println!("created agent {team}/{slug} (branch {branch})");

@@ -65,3 +65,17 @@ fn agent_new_requires_team_and_repo_flag() {
     let cfg = tempfile::tempdir().unwrap();
     damon(root.path(), cfg.path()).args(["agent", "new", "ghost/Scout", "--repo-new"]).assert().failure().stderr(contains("team"));
 }
+
+#[test]
+fn agent_new_codex_runtime_gets_matching_default_model() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    damon(root.path(), cfg.path()).args(["team", "new", "Mixed"]).assert().success();
+    damon(root.path(), cfg.path())
+        .args(["agent", "new", "mixed/Coder", "--runtime", "codex", "--repo-new"])
+        .assert()
+        .success();
+    let toml = std::fs::read_to_string(root.path().join("teams/mixed/agents/coder/agent.toml")).unwrap();
+    assert!(toml.contains("runtime = \"codex\""));
+    assert!(toml.contains("default_model = \"gpt\""));
+}
