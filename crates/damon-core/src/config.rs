@@ -55,6 +55,9 @@ pub enum Launcher {
 }
 
 pub fn expand_tilde(p: &str) -> PathBuf {
+    if p == "~" {
+        return dirs::home_dir().expect("no home dir");
+    }
     match p.strip_prefix("~/") {
         Some(rest) => dirs::home_dir().expect("no home dir").join(rest),
         None => PathBuf::from(p),
@@ -137,7 +140,29 @@ mod tests {
     #[test]
     fn expands_tilde() {
         let home = dirs::home_dir().unwrap();
+        assert_eq!(expand_tilde("~"), home);
         assert_eq!(expand_tilde("~/damon"), home.join("damon"));
         assert_eq!(expand_tilde("/abs/x"), std::path::PathBuf::from("/abs/x"));
+    }
+
+    #[test]
+    fn load_missing_file_yields_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c: Config = load_toml_or_default(&tmp.path().join("nope.toml")).unwrap();
+        assert_eq!(c, Config::default());
+    }
+
+    #[test]
+    fn load_malformed_toml_errors_with_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "not [valid toml").unwrap();
+        let err = load_toml_or_default::<Config>(&path).unwrap_err();
+        match err {
+            crate::CoreError::Toml { path: p, .. } => assert_eq!(p, path),
+            other => panic!("expected Toml error, got {other:?}"),
+        }
+        // never silently rewritten
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not [valid toml");
     }
 }
