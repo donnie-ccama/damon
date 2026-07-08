@@ -48,6 +48,7 @@ pub fn write_bridges(
     agent_name: &str,
     memory_dir: &Path,
     worktree: &Path,
+    damon_exe: &str,
 ) -> Result<Vec<PathBuf>, CoreError> {
     match runtime {
         RuntimeId::Claude => {
@@ -68,7 +69,33 @@ pub fn write_bridges(
                     source: e,
                 }
             })?;
-            Ok(vec![path])
+            let mut written = vec![path];
+
+            // The Stop hook command embeds `damon_exe` inside a JSON string that
+            // is itself run as a shell command by Claude Code. A path containing
+            // whitespace would break both the JSON and the resulting command
+            // line, so we skip writing settings.json in that case — the Stop
+            // hook is an enhancement (session-end reflection), not correctness,
+            // so degrading gracefully beats emitting a broken hook.
+            if !damon_exe.chars().any(char::is_whitespace) {
+                let settings_dir = worktree.join(".claude");
+                std::fs::create_dir_all(&settings_dir).map_err(|e| CoreError::Io {
+                    path: settings_dir.clone(),
+                    source: e,
+                })?;
+                let settings = settings_dir.join("settings.json");
+                let content = format!(
+                    "{{\n  \"hooks\": {{\n    \"Stop\": [\n      {{ \"hooks\": [ {{ \"type\": \"command\", \"command\": \"{} hook reflect\" }} ] }}\n    ]\n  }}\n}}\n",
+                    damon_exe
+                );
+                std::fs::write(&settings, content).map_err(|e| CoreError::Io {
+                    path: settings.clone(),
+                    source: e,
+                })?;
+                written.push(settings);
+            }
+
+            Ok(written)
         }
         RuntimeId::Codex => {
             let path = worktree.join("AGENTS.md");
@@ -109,17 +136,42 @@ mod tests {
     }
 
     #[test]
-    fn write_bridges_creates_claude_md_and_lists_it() {
+    fn write_bridges_creates_claude_md_and_settings_and_lists_both() {
         let tmp = tempfile::tempdir().unwrap();
         let written = write_bridges(
             RuntimeId::Claude,
             "Scout",
             std::path::Path::new("/mem"),
             tmp.path(),
+            "damon",
+        )
+        .unwrap();
+        assert_eq!(
+            written,
+            vec![
+                tmp.path().join("CLAUDE.md"),
+                tmp.path().join(".claude/settings.json"),
+            ]
+        );
+        assert!(tmp.path().join("CLAUDE.md").exists());
+        let settings = std::fs::read_to_string(tmp.path().join(".claude/settings.json")).unwrap();
+        assert!(settings.contains("\"Stop\""));
+        assert!(settings.contains("damon hook reflect"));
+    }
+
+    #[test]
+    fn write_bridges_skips_settings_when_damon_exe_has_whitespace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let written = write_bridges(
+            RuntimeId::Claude,
+            "Scout",
+            std::path::Path::new("/mem"),
+            tmp.path(),
+            "/path with space/damon",
         )
         .unwrap();
         assert_eq!(written, vec![tmp.path().join("CLAUDE.md")]);
-        assert!(tmp.path().join("CLAUDE.md").exists());
+        assert!(!tmp.path().join(".claude/settings.json").exists());
     }
 
     #[test]
@@ -130,7 +182,8 @@ mod tests {
         std::fs::write(memory.join("AGENT.md"), "agent").unwrap();
         std::fs::write(memory.join("USER.md"), "user").unwrap();
         std::fs::write(memory.join("MEMORY.md"), "memory").unwrap();
-        let written = write_bridges(RuntimeId::Codex, "Scout", &memory, tmp.path()).unwrap();
+        let written =
+            write_bridges(RuntimeId::Codex, "Scout", &memory, tmp.path(), "damon").unwrap();
         assert_eq!(written, vec![tmp.path().join("AGENTS.md")]);
         let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
         assert!(contents.contains("# Scout — Damon Codex agent"));
@@ -147,7 +200,8 @@ mod tests {
         std::fs::write(memory.join("AGENT.md"), "agent").unwrap();
         std::fs::write(memory.join("USER.md"), "user").unwrap();
         std::fs::write(memory.join("MEMORY.md"), "memory").unwrap();
-        let written = write_bridges(RuntimeId::Opencode, "Scout", &memory, tmp.path()).unwrap();
+        let written =
+            write_bridges(RuntimeId::Opencode, "Scout", &memory, tmp.path(), "damon").unwrap();
         assert_eq!(written, vec![tmp.path().join("AGENTS.md")]);
         let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
         assert!(contents.contains("# Scout — Damon OpenCode agent"));
@@ -164,6 +218,7 @@ mod tests {
             "S",
             std::path::Path::new("/me m"),
             tmp.path(),
+            "damon",
         );
         assert!(err.unwrap_err().to_string().contains("whitespace"));
     }

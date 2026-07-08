@@ -56,7 +56,8 @@ pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Resul
         // Regenerate bridges from canonical memory before every spawn.
         let worktree = store.worktree_dir(&entry.team, &entry.slug);
         let memory = store.memory_dir(&entry.team, &entry.slug);
-        let written = write_bridges(runtime, &agent.agent.name, &memory, &worktree)?;
+        let damon_exe = std::env::current_exe()?.display().to_string();
+        let written = write_bridges(runtime, &agent.agent.name, &memory, &worktree, &damon_exe)?;
         let names: Vec<String> = written
             .iter()
             .filter_map(|p| p.strip_prefix(&worktree).ok())

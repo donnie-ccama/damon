@@ -47,6 +47,18 @@ enum Cmd {
     Sessions,
     /// Kill a session by name, or all of an agent's sessions
     Kill { target: String },
+    /// Internal: hooks invoked by agent runtimes (e.g. Claude Code's Stop hook)
+    #[command(hide = true)]
+    Hook {
+        #[command(subcommand)]
+        cmd: HookCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCmd {
+    /// Session-end reflection: block the first Stop, prompt a memory write-back, allow the second
+    Reflect,
 }
 
 #[derive(Subcommand)]
@@ -160,6 +172,9 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
         } => commands::open::run(&reference, model.as_deref(), new),
         Cmd::Sessions => commands::sessions::ls(),
         Cmd::Kill { target } => commands::sessions::kill(&target),
+        Cmd::Hook { cmd } => match cmd {
+            HookCmd::Reflect => commands::hook::reflect(),
+        },
     }
 }
 
