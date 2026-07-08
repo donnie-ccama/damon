@@ -1,7 +1,10 @@
 # Damon — Design Spec
 
 **Date:** 2026-07-07
-**Status:** Approved (design review in conversation, 2026-07-07)
+**Status:** M1 + M2 SHIPPED (2026-07-08). This document is the approved design
+plus the **As-built addendum** at the end, which records every divergence
+between this spec and the shipped code. Read the addendum before planning M3 —
+where it conflicts with the body, the addendum (i.e. the code) wins.
 
 ## What
 
@@ -309,3 +312,91 @@ Git and tmux are driven via `std::process::Command` — no libgit2 in v1
    AUR later).
 
 Each milestone lands green (fmt, clippy, tests) before the next begins.
+
+---
+
+## As-built addendum (M1 + M2, 2026-07-08)
+
+Authoritative deltas between the approved design above and the shipped code
+at main `0847b9a`. Where this section conflicts with the body, this section
+wins.
+
+### Layout & config (changed from body)
+
+- **Config dir is `~/.config/damon` on EVERY OS** — the body's
+  "`dirs::config_dir()`" parenthetical was dropped (it resolves to
+  `~/Library/Application Support` on macOS). `default_config_dir(home)` is a
+  pure function = `<home>/.config/damon`. Overrides: `$DAMON_CONFIG_DIR`,
+  `$DAMON_ROOT` (env, mainly for tests).
+- **No panics on unresolvable home** — `expand_tilde`, `Config::config_dir`,
+  `Config::root` return `CoreError::NoHome` instead of `.expect()`.
+- **Stray directories are reported** — non-slug-named dirs under `teams/` or
+  any `agents/` surface via `Store::strays()` and print in `team ls` as
+  `INVALID NAME`, never silently hidden.
+
+### Models & keys (M2, replaces the body's models.toml sketch)
+
+- Shipped registry keys: `claude`, `gpt` (codex), `gpt_openrouter` (codex via
+  OpenRouter, `OPENAI_*` env), `kimi`, `minimax`, `glm` (claude runtime via
+  OpenRouter, `ANTHROPIC_*` env), `opencode`.
+- Env value resolution at spawn (whole-value placeholders only):
+  `${keyring:<account>}` → (1) `DAMON_KEY_<ACCOUNT>` env (uppercase, `-`/`.`→`_`)
+  then (2) OS keyring service `"damon"`, account `<account>`; `${VAR}` → damon's
+  own environment; anything else literal. Empty `${keyring:}` account → error.
+  `DAMON_NO_KEYRING` (non-empty) disables all OS-keychain access (key commands
+  fail cleanly; keyring models fall to the missing-key error).
+- `damon key set|rm <provider>`: rpassword hidden prompt on a TTY, reads stdin
+  when piped; keyring v2 `Entry::new("damon", provider)` (note: returns
+  `Result`).
+- **Threat model (documented in README):** resolved key goes keychain → memory
+  → `tmux -e` → session process environment for the session's lifetime;
+  same-user-only visibility; never written to disk/logs by damon. tmux error
+  strings redact `-e` values as `KEY=***` (`display_args` in damon-tmux).
+
+### Runtimes & bridges (M2, replaces the body's Runtime-adapter sketch)
+
+- No `Runtime` trait shipped — `RuntimeId` enum + exhaustive matches proved
+  sufficient. `RuntimeId::binary()` honors `DAMON_BIN_<RT>`; open honors
+  `DAMON_<RT>_ARGS` (test seams).
+- `write_bridges(runtime, agent_name, memory_dir, worktree, damon_exe)`:
+  - Claude → `CLAUDE.md` (absolute `@` imports; memory path must be
+    whitespace-free — validated) **+ `.claude/settings.json`** with a Stop
+    hook running `<damon_exe> hook reflect` (serde_json-built; skipped when
+    `damon_exe` contains whitespace — hook is enhancement, not correctness).
+  - Codex & OpenCode → `AGENTS.md` via shared `embedded_bridge(label, …)`
+    (memory content EMBEDDED — no import mechanism; write-back protocol
+    included textually).
+  - Returned paths drive git-exclusion (`.git/info/exclude` in the common dir).
+- `damon hook reflect` (hidden subcommand): stdin hook JSON;
+  `stop_hook_active:true` → exit 0; else reflection instruction on stderr +
+  exit 2 (blocks the stop exactly once; garbage stdin fails toward reflecting).
+- `agent new` default_model follows runtime: claude→`claude`, codex→`gpt`,
+  opencode→`opencode` (registry keys).
+
+### Misc deltas
+
+- `kill <agent>` continues past per-session failures, then reports
+  `killed N, failed M: …`.
+- `GitError::Io{path,source}` for fs failures (Spawn reserved for exec).
+- `worktree_add` probes `rev-parse --verify refs/heads/<branch>` and
+  deterministically attaches vs creates (no error-masking fallback).
+- Reattach picks highest session `n` numerically (`max_by_key` on parsed n).
+- Test conventions: real tmux on per-test scratch sockets with Drop-guard
+  teardown; real git in tempdirs with `GIT_CONFIG_GLOBAL/SYSTEM=/dev/null`;
+  keychain never touched by tests (`#[ignore]` for the one real round-trip).
+
+### Parked debt (triaged, non-blocking)
+
+M3: codex-whitespace-path bridge test; non-atomic CLAUDE.md/settings.json
+write pair; shell-metachar exe paths silently disable the hook; `slug_dirs`
+partial-failure edge (read_dir entry errors flattened); Slug::parse accepts
+trailing dash (derive doesn't emit one). M4: doctor's string-driven tmux gate;
+shared `info/exclude` touches the source repo's other worktrees (spec-level
+choice — revisit); `damon memory` command (spec body lists it; deferred).
+
+### Next milestone
+
+**M3 — ratatui TUI** (body's TUI section still accurate as the design):
+teams→agents rail with live session badges, Sessions/Memory tabs, keys
+n/Enter/x/m/N/q, stateless 2s refresh from filesystem + tmux, actions call
+the same functions as the CLI verbs.
