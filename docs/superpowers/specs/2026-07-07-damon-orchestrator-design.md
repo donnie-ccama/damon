@@ -477,6 +477,14 @@ cleanup, `damon memory`, Homebrew packaging.
   swallowed. Test: `exclude_remove_propagates_non_missing_read_errors`
   (`crates/damon-git/tests/repo_sources.rs`) writes raw non-UTF8 bytes
   (`[0xFF, 0xFE, 0xFD]`) to the exclude file and asserts `Err`.
+- **`exclude` hardened to match, post-final-review.** Both `exclude()`
+  and `exclude_remove()` now propagate non-`NotFound` read errors instead
+  of swallowing them; `exclude()` previously used
+  `unwrap_or_default()` on the initial read, which risked clobbering a
+  user's existing exclude file (non-UTF8 content, permission denied)
+  with a fresh block on write. Test:
+  `exclude_propagates_non_missing_read_errors_instead_of_clobbering`
+  (`crates/damon-git/tests/repo_sources.rs`).
 - **`agent rm` exclude cleanup fails closed beyond the plan's sample.**
   `cleanup_exclude` (`crates/damon/src/commands/agent.rs`) decides
   whether another agent still uses the repo via
@@ -519,7 +527,11 @@ cleanup, `damon memory`, Homebrew packaging.
   (`crates/damon/src/commands/doctor.rs`). `REQUIRED: [&str; 2] =
   ["git", "tmux"]`. The live-compared render output matched the
   pre-refactor output byte-for-byte, including the em-dash character
-  (U+2014) in hint text.
+  (U+2014) in hint text. **Divergence:** the M4 design doc
+  (`docs/superpowers/specs/2026-07-08-damon-m4-design.md`) listed a
+  keyring check among doctor's checks, but none shipped — none existed
+  pre-M4 either, and the byte-identical-output constraint won; a keyring
+  check remains unimplemented.
 - **Homebrew: explicit-URL tap fallback documented but not needed.**
   `docs/PACKAGING.md` records the `brew tap donnie-ccama/damon
   https://github.com/donnie-ccama/homebrew-damon` fallback for when tap
