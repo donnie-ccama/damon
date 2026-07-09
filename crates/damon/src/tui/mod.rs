@@ -12,7 +12,7 @@ use damon_core::models::ModelsFile;
 use damon_core::store::Store;
 use damon_tmux::Tmux;
 use ratatui::crossterm::event::KeyCode;
-use snapshot::{LiveSession, Snapshot};
+use snapshot::Snapshot;
 use std::io::IsTerminal;
 use std::time::Duration;
 
@@ -68,15 +68,7 @@ fn load_world(config: &Config) -> Result<Snapshot, String> {
     let inner = || -> anyhow::Result<Snapshot> {
         let store = Store::new(config.root()?);
         let tmux = Tmux::new(config.tmux.socket.clone());
-        let mut live = Vec::new();
-        for s in tmux.list_info()? {
-            let model = tmux.env_var(&s.name, "DAMON_MODEL").ok().flatten();
-            live.push(LiveSession {
-                name: s.name,
-                created_unix: s.created_unix,
-                model,
-            });
-        }
+        let live = snapshot::live_sessions(&tmux)?;
         let models = ModelsFile::load()?;
         Ok(Snapshot::build(&store, &live, &models)?)
     };

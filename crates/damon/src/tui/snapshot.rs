@@ -4,6 +4,7 @@ use damon_core::session_name::SessionName;
 use damon_core::slug::Slug;
 use damon_core::store::{Store, StrayDir};
 use damon_core::CoreError;
+use damon_tmux::Tmux;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -113,6 +114,21 @@ impl Snapshot {
             .iter()
             .find(|a| &a.slug == agent)
     }
+}
+
+/// One LiveSession per tmux session, with its DAMON_MODEL when readable.
+/// Shared by the production event loop and tests — one loop, two callers.
+pub fn live_sessions(tmux: &Tmux) -> Result<Vec<LiveSession>, damon_tmux::TmuxError> {
+    let mut live = Vec::new();
+    for info in tmux.list_info()? {
+        let model = tmux.env_var(&info.name, "DAMON_MODEL").ok().flatten();
+        live.push(LiveSession {
+            name: info.name,
+            created_unix: info.created_unix,
+            model,
+        });
+    }
+    Ok(live)
 }
 
 /// AGENT/USER/MEMORY plus skills/*/SKILL.md, stable order.
@@ -268,15 +284,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut live = Vec::new();
-        for info in tmux.list_info().unwrap() {
-            let model = tmux.env_var(&info.name, "DAMON_MODEL").ok().flatten();
-            live.push(LiveSession {
-                name: info.name,
-                created_unix: info.created_unix,
-                model,
-            });
-        }
+        let live = live_sessions(tmux).unwrap();
         let snap = Snapshot::build(&store, &live, &ModelsFile::default()).unwrap();
         let agent = snap.agent(&s("newsletter"), &s("scout")).unwrap();
         assert_eq!(agent.sessions.len(), 1);
