@@ -183,6 +183,21 @@ fn exclude_remove_propagates_non_missing_read_errors() {
 }
 
 #[test]
+fn exclude_propagates_non_missing_read_errors_instead_of_clobbering() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    let file = exclude_file(&wt);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    // Invalid UTF-8: read_to_string fails with a non-NotFound error.
+    std::fs::write(&file, [0xFF, 0xFE, 0xFD]).unwrap();
+    assert!(damon_git::exclude(&wt, &["CLAUDE.md"]).is_err());
+    // The user's file was NOT clobbered.
+    assert_eq!(std::fs::read(&file).unwrap(), vec![0xFF, 0xFE, 0xFD]);
+}
+
+#[test]
 fn common_dir_matches_for_source_repo_and_its_worktree() {
     isolate_git();
     let tmp = tempfile::tempdir().unwrap();

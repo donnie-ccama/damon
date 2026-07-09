@@ -96,6 +96,8 @@ fn exclude_path(repo: &Path) -> Result<PathBuf, GitError> {
 /// Ensure `entries` are ignored via a sentinel-delimited block in
 /// <git-common-dir>/info/exclude. Idempotent; lines outside the markers are
 /// never touched, except legacy damon patterns, which migrate into the block.
+/// A missing exclude file starts empty; any other read error propagates
+/// rather than risking a clobber.
 pub fn exclude(worktree: &Path, entries: &[&str]) -> Result<(), GitError> {
     let path = exclude_path(worktree)?;
     if let Some(parent) = path.parent() {
@@ -104,7 +106,16 @@ pub fn exclude(worktree: &Path, entries: &[&str]) -> Result<(), GitError> {
             source,
         })?;
     }
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(GitError::Io {
+                path: path.clone(),
+                source: e,
+            })
+        }
+    };
     let updated = upsert_block(&existing, entries);
     if updated != existing {
         write_file(&path, &updated)?;
