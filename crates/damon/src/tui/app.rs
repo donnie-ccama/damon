@@ -242,7 +242,7 @@ fn update_preview(m: &mut Model, key: KeyEvent) -> Vec<Action> {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => m.preview = None,
         KeyCode::Up | KeyCode::Char('k') => p.scroll = p.scroll.saturating_sub(1),
-        KeyCode::Down | KeyCode::Char('j') => p.scroll = (p.scroll + 1).min(max),
+        KeyCode::Down | KeyCode::Char('j') => p.scroll = p.scroll.saturating_add(1).min(max),
         KeyCode::PageUp => p.scroll = p.scroll.saturating_sub(10),
         KeyCode::PageDown => p.scroll = p.scroll.saturating_add(10).min(max),
         KeyCode::Char('e') => {
@@ -424,6 +424,27 @@ mod tests {
         let mut m = Model::default();
         update(&mut m, &snap, key(KeyCode::Char('j'))); // select scout
         update(&mut m, &snap, key(KeyCode::Char('m'))); // Memory tab
+        let actions = update(&mut m, &snap, key(KeyCode::Char('e')));
+        assert_eq!(
+            actions,
+            vec![Action::Edit {
+                path: "/mem/AGENT.md".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn e_in_preview_emits_edit_action() {
+        let snap = snap_fixture();
+        let mut m = Model {
+            preview: Some(Preview {
+                title: "AGENT.md".into(),
+                content: "hi".into(),
+                scroll: 0,
+                path: "/mem/AGENT.md".into(),
+            }),
+            ..Default::default()
+        };
         let actions = update(&mut m, &snap, key(KeyCode::Char('e')));
         assert_eq!(
             actions,
