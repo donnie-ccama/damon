@@ -31,12 +31,16 @@ fn collect_files(dir: &Path, base: &Path, out: &mut Vec<(PathBuf, String)>) -> a
         Err(e) => return Err(anyhow::anyhow!("{}: {e}", dir.display())),
     };
     for entry in entries {
-        let path = entry
-            .map_err(|e| anyhow::anyhow!("{}: {e}", dir.display()))?
-            .path();
-        if path.is_dir() {
+        let entry = entry.map_err(|e| anyhow::anyhow!("{}: {e}", dir.display()))?;
+        // file_type() does NOT follow symlinks: a symlinked dir is neither
+        // is_dir() nor is_file() here, so it is skipped — no cycle risk.
+        let ft = entry
+            .file_type()
+            .map_err(|e| anyhow::anyhow!("{}: {e}", entry.path().display()))?;
+        let path = entry.path();
+        if ft.is_dir() {
             collect_files(&path, base, out)?;
-        } else if path.is_file() {
+        } else if ft.is_file() {
             let rel = path.strip_prefix(base).unwrap_or(&path).to_path_buf();
             out.push((rel, std::fs::read_to_string(&path)?));
         }
@@ -201,5 +205,28 @@ mod tests {
         assert_eq!(editor_from(Some(""), Some("vim")), "vim"); // empty = unset
         assert_eq!(editor_from(None, None), "vi");
         assert_eq!(editor_from(None, Some("")), "vi");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn files_ignores_symlinked_dirs_without_looping() {
+        let tmp = memory_fixture(); // has skills/research/SKILL.md
+                                    // A symlink under skills/ pointing back at the memory root would loop
+                                    // a symlink-following walk forever.
+        std::os::unix::fs::symlink(tmp.path(), tmp.path().join("skills/loop")).unwrap();
+        let files = files(tmp.path()).unwrap();
+        let names: Vec<String> = files
+            .iter()
+            .map(|(p, _)| p.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "AGENT.md",
+                "USER.md",
+                "MEMORY.md",
+                "skills/research/SKILL.md"
+            ]
+        );
     }
 }

@@ -142,6 +142,8 @@ damon memory <team>/<agent> [FILE]          # print memory (all surfaces, or one
 damon memory <team>/<agent> [FILE] --edit   # open in $VISUAL/$EDITOR (default MEMORY.md)
 ```
 
+> Symlinks under an agent's `skills/` directory are ignored by `damon memory`.
+
 ## TUI
 
 ```bash
