@@ -416,4 +416,79 @@ mod tests {
         assert_eq!(fmt_uptime(59), "0m59s");
         assert_eq!(fmt_uptime(-5), "0m00s");
     }
+
+    fn rendered_terminal(m: &Model, snap: &Snapshot) -> Terminal<TestBackend> {
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        terminal.draw(|f| render(f, m, snap, 1000 + 3723)).unwrap();
+        terminal
+    }
+
+    /// Every buffer cell rendered with the REVERSED modifier, concatenated.
+    fn reversed_text(backend: &TestBackend) -> String {
+        let buf = backend.buffer();
+        let mut out = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                if cell.style().add_modifier.contains(Modifier::REVERSED) {
+                    out.push_str(cell.symbol());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn rail_selection_renders_reversed() {
+        let m = Model {
+            sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
+            ..Default::default()
+        };
+        let terminal = rendered_terminal(&m, &snap());
+        let rev = reversed_text(terminal.backend());
+        assert!(rev.contains("Scout"), "reversed cells: {rev:?}");
+        assert!(!rev.contains("Newsletter"), "reversed cells: {rev:?}");
+    }
+
+    #[test]
+    fn model_picker_popup_renders_and_marks_selection() {
+        let m = Model {
+            popup: Some(crate::tui::popup::Popup::ModelPicker(
+                crate::tui::popup::ModelPicker {
+                    reference: "newsletter/scout".into(),
+                    models: vec![
+                        ("claude".into(), "Claude".into()),
+                        ("kimi".into(), "Kimi K2".into()),
+                    ],
+                    selected: 1,
+                },
+            )),
+            ..Default::default()
+        };
+        let terminal = rendered_terminal(&m, &snap());
+        let text = buffer_text(terminal.backend());
+        assert!(text.contains("pick model"));
+        assert!(text.contains("Claude (claude)"));
+        assert!(text.contains("Kimi K2 (kimi)"));
+        let rev = reversed_text(terminal.backend());
+        assert!(rev.contains("Kimi K2 (kimi)"), "reversed cells: {rev:?}");
+        assert!(!rev.contains("Claude (claude)"), "reversed cells: {rev:?}");
+    }
+
+    #[test]
+    fn new_agent_form_popup_renders_fields_and_focus() {
+        let mut form = crate::tui::popup::NewAgentForm::new(s("newsletter"));
+        form.name = "Editor".into();
+        let m = Model {
+            popup: Some(crate::tui::popup::Popup::NewAgent(form)),
+            ..Default::default()
+        };
+        let text = rendered(&m, &snap());
+        assert!(text.contains("new agent"));
+        assert!(text.contains("team     newsletter"));
+        assert!(text.contains("▶ name     Editor")); // Name focused on a fresh form
+        assert!(text.contains("runtime  claude"));
+        assert!(text.contains("source   new"));
+        assert!(text.contains("Tab next"));
+    }
 }
