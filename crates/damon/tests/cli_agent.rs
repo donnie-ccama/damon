@@ -126,3 +126,59 @@ fn agent_new_codex_runtime_gets_matching_default_model() {
     assert!(toml.contains("runtime = \"codex\""));
     assert!(toml.contains("default_model = \"gpt\""));
 }
+
+#[test]
+fn agent_rm_cleans_exclude_block_after_last_worktree_agent() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), &["init", "-b", "main"]);
+    git(project.path(), &["config", "user.email", "t@example.com"]);
+    git(project.path(), &["config", "user.name", "t"]);
+    std::fs::write(project.path().join("README.md"), "x").unwrap();
+    git(project.path(), &["add", "-A"]);
+    git(project.path(), &["commit", "-m", "seed"]);
+    // A user pattern that must survive everything damon does.
+    let exclude = project.path().join(".git/info/exclude");
+    std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+    std::fs::write(&exclude, "user-pattern\n").unwrap();
+
+    damon(root.path(), cfg.path())
+        .args(["team", "new", "Web"])
+        .assert()
+        .success();
+    for name in ["web/A", "web/B"] {
+        damon(root.path(), cfg.path())
+            .args([
+                "agent",
+                "new",
+                name,
+                "--repo-worktree",
+                project.path().to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+    }
+    // Simulate what `open` does: write the block for this repo.
+    let wt_a = root.path().join("teams/web/agents/a/worktree");
+    damon_git::exclude(&wt_a, &["CLAUDE.md", ".claude/settings.json"]).unwrap();
+    assert!(std::fs::read_to_string(&exclude)
+        .unwrap()
+        .contains("# damon begin"));
+
+    // First rm: agent B still references the repo — block stays.
+    damon(root.path(), cfg.path())
+        .args(["agent", "rm", "web/a", "--yes"])
+        .assert()
+        .success();
+    assert!(std::fs::read_to_string(&exclude)
+        .unwrap()
+        .contains("# damon begin"));
+
+    // Last rm: block goes, user pattern survives.
+    damon(root.path(), cfg.path())
+        .args(["agent", "rm", "web/b", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(&exclude).unwrap(), "user-pattern\n");
+}

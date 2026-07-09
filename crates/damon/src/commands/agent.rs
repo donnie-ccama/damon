@@ -136,9 +136,11 @@ pub fn rm(reference: &str, yes: bool) -> anyhow::Result<()> {
     }
     let store = store()?;
     let entry = store.resolve(reference)?;
+    let mut worktree_source: Option<String> = None;
     if let Ok(file) = &entry.agent {
         if file.repo.source == RepoSource::Worktree {
             if let Some(project) = &file.repo.path {
+                worktree_source = Some(project.clone());
                 let wt = store.worktree_dir(&entry.team, &entry.slug);
                 match expand_tilde(project) {
                     Ok(project_dir) => {
@@ -156,6 +158,47 @@ pub fn rm(reference: &str, yes: bool) -> anyhow::Result<()> {
         }
     }
     std::fs::remove_dir_all(&entry.dir)?;
+    // The agent is out of the store now, so the scan below sees only survivors.
+    if let Some(project) = worktree_source {
+        cleanup_exclude(&store, &project);
+    }
     println!("removed agent {}/{}", entry.team, entry.slug);
     Ok(())
+}
+
+/// Drop damon's info/exclude block once the last worktree agent for a repo is
+/// gone. Warn-and-continue throughout: cleanup must never block removal.
+fn cleanup_exclude(store: &Store, project: &str) {
+    let target = match expand_tilde(project)
+        .ok()
+        .and_then(|p| damon_git::common_dir(&p).ok())
+        .and_then(|c| c.canonicalize().ok())
+    {
+        Some(c) => c,
+        None => {
+            eprintln!(
+                "warning: cannot resolve {project:?} for info/exclude cleanup; \
+                 remove the damon block manually if it lingers"
+            );
+            return;
+        }
+    };
+    let still_used = store.all_agents().unwrap_or_default().iter().any(|a| {
+        a.agent.as_ref().ok().is_some_and(|f| {
+            f.repo.source == RepoSource::Worktree
+                && f.repo.path.as_deref().is_some_and(|p| {
+                    expand_tilde(p)
+                        .ok()
+                        .and_then(|p| damon_git::common_dir(&p).ok())
+                        .and_then(|c| c.canonicalize().ok())
+                        .is_some_and(|c| c == target)
+                })
+        })
+    });
+    if still_used {
+        return;
+    }
+    if let Err(e) = damon_git::exclude_remove(&target) {
+        eprintln!("warning: could not clean info/exclude ({e}); remove the damon block manually");
+    }
 }

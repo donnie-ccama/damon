@@ -118,6 +118,14 @@ damon agent new web/Fixer --repo-worktree ~/Projects/my-site
 # in its own worktree, without touching your checkout
 ```
 
+> **Note (worktree agents):** while a worktree agent exists for a repo, damon
+> keeps a `# damon begin … # damon end` block in that repo's shared
+> `.git/info/exclude`, so *untracked* files named like bridge files
+> (`CLAUDE.md`, `AGENTS.md`, `.claude/settings.json`) are hidden from
+> `git status` in the repo's **other** worktrees too. Tracked files are
+> unaffected. The block is removed when the last damon worktree agent for
+> that repo is deleted.
+
 ## Command reference
 
 ```
