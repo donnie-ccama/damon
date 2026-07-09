@@ -1,26 +1,25 @@
 # Packaging
 
-## Homebrew (private tap)
+## Homebrew
 
-Tap: `donnie-ccama/homebrew-damon` (private), formula `Formula/damon.rb`.
+Tap: `donnie-ccama/homebrew-damon`, formula `Formula/damon.rb`.
 
-    brew install --HEAD donnie-ccama/damon/damon
+    brew install donnie-ccama/damon/damon        # latest tagged release
+    brew install --HEAD donnie-ccama/damon/damon # build main from source
 
-- HEAD-only by design: the damon repo is private and untagged, so the
-  formula builds `main` from source with the user's git credentials.
-- If the tap won't resolve (private repo), tap explicitly once:
-  `brew tap donnie-ccama/damon https://github.com/donnie-ccama/homebrew-damon`
-- Upgrading a HEAD install: `brew upgrade --fetch-HEAD damon`.
+The repository is public, so the versioned formula uses a GitHub release
+tarball `url` + `sha256`; `head` still builds `main`.
 
-## Cutting the first versioned release (post-M4)
+### Cutting a release
 
-1. Tag: `git tag v0.1.0 && git push origin v0.1.0`.
-2. In the formula, add
-   `url "https://github.com/donnie-ccama/damon/archive/refs/tags/v0.1.0.tar.gz"`
-   and its `sha256` (private repos need `HOMEBREW_GITHUB_API_TOKEN` for the
-   tarball download — or stay HEAD-only until the repo goes public).
-3. `brew audit --strict damon` in the tap before pushing.
+1. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+2. sha256: `curl -sL https://github.com/donnie-ccama/damon/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256`.
+3. Update `url` + `sha256` in the tap's `Formula/damon.rb`.
+4. `brew audit --strict --online damon`, then `brew install donnie-ccama/damon/damon` to verify.
+5. Commit + push the tap.
 
 ## AUR
 
-Deferred (unchanged from the parent spec).
+Package `damon` (source build from the release tarball). Artifacts live in
+`packaging/aur/` (`PKGBUILD`, `.SRCINFO`); publishing steps are in
+`packaging/aur/PUBLISHING.md`. AUR publish runs on Arch.
