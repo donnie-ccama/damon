@@ -456,38 +456,108 @@ Where this section conflicts with the body, this section wins.
   being assembled module-by-module, were accepted as normal mid-milestone
   noise and are gone by the milestone gate.
 
+### M4 — as shipped (2026-07-08)
+
+Five areas, per `docs/superpowers/specs/2026-07-08-damon-m4-design.md`:
+parked-debt fixes, doctor's structured checks, `info/exclude` block +
+cleanup, `damon memory`, Homebrew packaging.
+
+- **`damon-git` `KNOWN_PATTERNS` filter closure.** The plan's sketch
+  compiled as written via auto-deref: `KNOWN_PATTERNS: [&str; 3] =
+  ["CLAUDE.md", "AGENTS.md", ".claude/settings.json"]`,
+  `.filter(|l| !KNOWN_PATTERNS.contains(&l.trim()))` with `l: &&str` —
+  `contains(&l.trim())` compares `&&str` against `&str` through
+  deref-coercion, no explicit `*l` needed. Used identically in
+  `upsert_block`'s before/after-line filters and in `exclude_remove`'s
+  line-drop loop (`crates/damon-git/src/lib.rs`).
+- **`exclude_remove` hardened beyond the plan's sample.** Only
+  `io::ErrorKind::NotFound` on the initial read is a no-op
+  (`return Ok(())`); every other read error (permission denied, non-UTF8
+  content) propagates as `GitError::Io { path, source }` instead of being
+  swallowed. Test: `exclude_remove_propagates_non_missing_read_errors`
+  (`crates/damon-git/tests/repo_sources.rs`) writes raw non-UTF8 bytes
+  (`[0xFF, 0xFE, 0xFD]`) to the exclude file and asserts `Err`.
+- **`agent rm` exclude cleanup fails closed beyond the plan's sample.**
+  `cleanup_exclude` (`crates/damon/src/commands/agent.rs`) decides
+  whether another agent still uses the repo via
+  `store.all_agents().unwrap_or_default().iter().any(|a| match
+  a.agent.as_ref() { Err(_) => true, Ok(f) => /* path match */ })` — a
+  surviving agent whose `agent.toml` fails to parse counts as *still
+  using the repo*, so the exclude block is left in place (stale block
+  beats broken exclusions). Test:
+  `agent_rm_skips_exclude_cleanup_when_survivor_toml_is_corrupt`
+  (`crates/damon/tests/cli_agent.rs`) corrupts a survivor's `agent.toml`
+  and asserts the block (`# damon begin`) survives `agent rm`.
+  **Consequence, deliberate:** any corrupt `agent.toml` anywhere in the
+  store suppresses cleanup for every repo being checked in that call — do
+  not optimize this back to a narrower per-repo check.
+- **`damon memory` gained a guard not in the plan.** If the agent's
+  memory dir itself is missing, all modes (print-all, single-file,
+  `--edit`) bail before doing anything else, with:
+  `"no memory directory for {reference} at {} — the agent is broken;
+  recreate it"` (`crates/damon/src/commands/memory.rs`, `run`). This
+  closes an inconsistency the plan didn't anticipate: no-FILE would have
+  printed empty output / exited 0 while FILE-given errored. Test:
+  `memory_errors_when_memory_dir_is_missing`
+  (`crates/damon/tests/cli_memory.rs`) deletes an agent's `memory/` dir
+  entirely and asserts failure with `"no memory directory"` on stderr.
+- **Editor rule shipped as planned.** `editor_from(visual, editor)`
+  checks `$VISUAL`, then `$EDITOR`, then falls back to `"vi"`; each value
+  is trimmed and an empty-after-trim value counts as unset
+  (`find(|v| !v.is_empty())` post-`.trim()`). The resolved string is
+  split on whitespace into program + args
+  (`editor.split_whitespace()`) and spawned inheriting the TTY; on a
+  non-zero exit damon calls `std::process::exit(status.code().unwrap_or(1))`,
+  propagating the editor's own exit code (or `1` if the code is
+  unavailable, e.g. killed by signal).
+- **Doctor: structured checks, output verified byte-identical to
+  legacy.** `CheckStatus { Ok(String), Missing, TooOld { found: (u32,
+  u32), need: (u32, u32) } }` replaces the string-driven gate; gating
+  (`failed_required`) reads `CheckStatus` via `CheckResult::passed()`,
+  never the rendered display line — enforced by test
+  `gate_reads_status_not_rendered_text`
+  (`crates/damon/src/commands/doctor.rs`). `REQUIRED: [&str; 2] =
+  ["git", "tmux"]`. The live-compared render output matched the
+  pre-refactor output byte-for-byte, including the em-dash character
+  (U+2014) in hint text.
+- **Homebrew: explicit-URL tap fallback documented but not needed.**
+  `docs/PACKAGING.md` records the `brew tap donnie-ccama/damon
+  https://github.com/donnie-ccama/homebrew-damon` fallback for when tap
+  auto-resolution fails against a private repo, but in practice
+  `brew install --HEAD donnie-ccama/damon/damon` auto-tapped and resolved
+  on the first try via the user's stored git credentials — no explicit
+  tap step required. Source build completed in ~12s; `brew test damon`
+  passed. Tap repo `donnie-ccama/homebrew-damon` at commit `9bd45bd`.
+
 ### Parked debt (triaged, non-blocking)
 
-M3 phase-0 items (codex-whitespace-path bridge test, non-atomic bridge
-writes, silent hook disable, `slug_dirs` partial-failure edge, `Slug::parse`
-trailing dash) are cleared — see "M3 — Phase 0 deltas" above. Newly parked
-during M3, all non-blocking:
+All five M3 items (tmp-file cleanup on failed atomic writes, popup
+`TestBackend` coverage, the `ensure_selection` mem_idx-reset papercut,
+the live-session-loop duplication, and the silent no-op on `N` with an
+empty rail) shipped in M4 Tasks 1–5 and are cleared. Newly parked during
+M4, all non-blocking, are M5 candidates:
 
-- Tmp-file cleanup on a failed atomic write (`write_atomic` leaves the temp
-  file behind if the rename step fails).
-- No `TestBackend` coverage for the ModelPicker/NewAgent popups or the
-  `REVERSED` selection style — view tests exist for the rail and tabs but
-  not yet for popup rendering.
-- `ensure_selection` doesn't reset the memory-cursor index (`mem_idx`) on
-  rail-selection change — a papercut, not a correctness bug (the cursor
-  just starts mid-list if the previous agent's memory list was longer).
-- Live-session-loop duplication between `load_world` (production tmux path)
-  and the test-fixture loop — same shape, two call sites, not yet unified.
-- Pressing `N` on an empty rail (no teams yet) is a silent no-op instead of
-  giving the user a hint to run `damon team new` first.
-
-M4 (unchanged from M1+M2 addendum, still deferred): doctor's string-driven
-tmux gate; shared `info/exclude` touches the source repo's other worktrees
-(spec-level choice — revisit); `damon memory` command (spec body lists it;
-deferred).
+- No cross-process lock on the `info`/`exclude` read-modify-write: two
+  concurrent `damon open`s against the same repo can lose one update
+  (the temp-file+rename pattern only guarantees single-writer atomicity,
+  not mutual exclusion across processes). Self-heals on the next spawn,
+  since bridges and the exclude block regenerate every `open` — revisit
+  only if parallel opens become a routine workflow.
+- `KNOWN_PATTERNS` in `damon-git` is a manually-synced list of bridge
+  filenames; a future runtime that introduces a new bridge filename must
+  add it there for legacy-line migration to pick it up.
+- The `skills/` recursive walk in `commands/memory.rs` follows
+  symlinked directories with no cycle guard.
+- `cleanup_exclude` duplicates the expand-tilde → `common_dir` →
+  `canonicalize` chain twice (once per comparison side) — a helper-
+  extraction candidate, not a correctness issue.
+- Carried from the M3 final review, still unaddressed: N+1
+  `tmux show-environment` calls per TUI refresh at scale; unbounded
+  preview scroll in the Memory tab.
 
 ### Next milestone
 
-**M4 — polish and packaging:** `damon memory --edit`; doctor's
-string-driven tmux gate; `damon memory` command; packaging (Homebrew /
-AUR); shared `info/exclude` multi-worktree concern revisited. Plus the
-newly parked M3 debt above: tmp-file cleanup on failed atomic writes,
-`TestBackend` coverage for the ModelPicker/NewAgent popups and the
-`REVERSED` style, the `ensure_selection` mem_idx-reset papercut, the
-live-session-loop duplication between `load_world` and tests, and the
-silent no-op when `N` is pressed on an empty rail.
+**M5 candidates:** a versioned Homebrew release (cut tag `v0.1.0`, add a
+`url`/`sha256` formula stanza, or go public); wiring `damon memory --edit`
+into the TUI via the same print-free core; `info`/`exclude` read-modify-
+write locking (above); AUR packaging.
