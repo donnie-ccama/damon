@@ -180,8 +180,11 @@ pub fn update(m: &mut Model, snap: &Snapshot, ev: Event) -> Vec<Action> {
                 Some(RailSel::Team(t)) | Some(RailSel::Agent(t, _)) => Some(t.clone()),
                 None => None,
             };
-            if let Some(team) = team {
-                m.popup = Some(Popup::NewAgent(crate::tui::popup::NewAgentForm::new(team)));
+            match team {
+                Some(team) => {
+                    m.popup = Some(Popup::NewAgent(crate::tui::popup::NewAgentForm::new(team)));
+                }
+                None => m.status = Some("no teams — run `damon team new` first".into()),
             }
         }
         _ => {}
@@ -519,5 +522,21 @@ mod tests {
         update(&mut m, &snap, Event::Tick);
         assert_eq!(m.sel, Some(RailSel::Team(s("newsletter"))));
         assert_eq!(m.mem_idx, 0);
+    }
+
+    #[test]
+    fn n_uppercase_on_empty_rail_hints_team_new() {
+        let snap = Snapshot {
+            teams: vec![],
+            strays: vec![],
+            models: vec![],
+        };
+        let mut m = Model::default();
+        update(&mut m, &snap, key(KeyCode::Char('N')));
+        assert!(m.popup.is_none());
+        assert_eq!(
+            m.status.as_deref(),
+            Some("no teams — run `damon team new` first")
+        );
     }
 }
