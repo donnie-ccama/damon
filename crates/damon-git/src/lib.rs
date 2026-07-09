@@ -80,6 +80,13 @@ const BLOCK_END: &str = "# damon end";
 /// unmarked lines from pre-block installs into the block.
 const KNOWN_PATTERNS: [&str; 3] = ["CLAUDE.md", "AGENTS.md", ".claude/settings.json"];
 
+/// The bridge filenames damon-git recognizes for legacy-line migration.
+/// Kept in sync with `damon_core::bridge::write_bridges` by a cross-crate
+/// test in the `damon` crate (`tests/bridge_exclude_sync.rs`).
+pub fn known_patterns() -> &'static [&'static str] {
+    &KNOWN_PATTERNS
+}
+
 /// Absolute git common dir for the repo containing `path`.
 pub fn common_dir(path: &Path) -> Result<PathBuf, GitError> {
     let out = git(
