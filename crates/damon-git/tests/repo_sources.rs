@@ -170,6 +170,19 @@ fn exclude_remove_without_exclude_file_is_ok() {
 }
 
 #[test]
+fn exclude_remove_propagates_non_missing_read_errors() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    let file = exclude_file(&wt);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    // Invalid UTF-8 makes read_to_string fail with a non-NotFound error.
+    std::fs::write(&file, [0xFF, 0xFE, 0xFD]).unwrap();
+    assert!(damon_git::exclude_remove(&wt).is_err());
+}
+
+#[test]
 fn common_dir_matches_for_source_repo_and_its_worktree() {
     isolate_git();
     let tmp = tempfile::tempdir().unwrap();

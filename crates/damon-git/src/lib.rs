@@ -114,11 +114,18 @@ pub fn exclude(worktree: &Path, entries: &[&str]) -> Result<(), GitError> {
 
 /// Remove damon's block (and any legacy damon lines). `repo` is any path
 /// inside the repo — the source project dir works after the agent worktree
-/// is gone. Missing exclude file is a no-op.
+/// is gone. A missing exclude file is a no-op; any other read error propagates.
 pub fn exclude_remove(repo: &Path) -> Result<(), GitError> {
     let path = exclude_path(repo)?;
-    let Ok(existing) = std::fs::read_to_string(&path) else {
-        return Ok(());
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(GitError::Io {
+                path: path.clone(),
+                source: e,
+            })
+        }
     };
     let (before, _block, after) = split_block(&existing);
     let mut out = String::new();
