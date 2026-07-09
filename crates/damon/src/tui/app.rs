@@ -91,6 +91,7 @@ fn ensure_selection(m: &mut Model, snap: &Snapshot) {
     let rows = rail_rows(snap);
     if !m.sel.as_ref().is_some_and(|s| rows.contains(s)) {
         m.sel = rows.first().cloned();
+        m.mem_idx = 0;
     }
 }
 
@@ -505,5 +506,18 @@ mod tests {
             }
             other => panic!("expected NewAgent popup, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn vanished_selection_resets_memory_cursor() {
+        let snap = snap_fixture();
+        let mut m = Model {
+            sel: Some(RailSel::Agent(s("gone"), s("gone"))),
+            mem_idx: 5,
+            ..Default::default()
+        };
+        update(&mut m, &snap, Event::Tick);
+        assert_eq!(m.sel, Some(RailSel::Team(s("newsletter"))));
+        assert_eq!(m.mem_idx, 0);
     }
 }
