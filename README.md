@@ -138,6 +138,8 @@ damon agent ls [team] | rm <team>/<agent> --yes
 damon open <agent> [--model M] [--new]
 damon sessions
 damon kill <session-name | agent>
+damon memory <team>/<agent> [FILE]          # print memory (all surfaces, or one file)
+damon memory <team>/<agent> [FILE] --edit   # open in $VISUAL/$EDITOR (default MEMORY.md)
 ```
 
 ## TUI

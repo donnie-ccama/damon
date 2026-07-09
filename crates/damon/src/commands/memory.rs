@@ -65,8 +65,15 @@ pub fn run(reference: &str, file: Option<&str>, edit: bool) -> anyhow::Result<()
     let store = Store::new(config.root()?);
     let entry = store.resolve(reference)?;
     let dir = store.memory_dir(&entry.team, &entry.slug);
+    if !dir.is_dir() {
+        anyhow::bail!(
+            "no memory directory for {reference} at {} — the agent is broken; recreate it",
+            dir.display()
+        );
+    }
     if edit {
-        anyhow::bail!("--edit lands in the next task"); // Task 10 replaces this line
+        let path = resolve_file(&dir, file.unwrap_or("MEMORY.md"))?;
+        return edit_file(&path);
     }
     match file {
         Some(f) => {
@@ -82,6 +89,37 @@ pub fn run(reference: &str, file: Option<&str>, edit: bool) -> anyhow::Result<()
                 }
             }
         }
+    }
+    Ok(())
+}
+
+/// $VISUAL, then $EDITOR, then vi. Empty values count as unset.
+fn editor_from(visual: Option<&str>, editor: Option<&str>) -> String {
+    [visual, editor]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|v| !v.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "vi".to_string())
+}
+
+/// Spawn the editor inheriting the TTY; damon exits with the editor's code.
+/// Editor values may carry flags ("code -w"), so split on whitespace.
+fn edit_file(path: &Path) -> anyhow::Result<()> {
+    let editor = editor_from(
+        std::env::var("VISUAL").ok().as_deref(),
+        std::env::var("EDITOR").ok().as_deref(),
+    );
+    let mut parts = editor.split_whitespace();
+    let program = parts.next().expect("editor_from never returns empty");
+    let status = std::process::Command::new(program)
+        .args(parts)
+        .arg(path)
+        .status()
+        .map_err(|e| anyhow::anyhow!("cannot launch editor {editor:?}: {e}"))?;
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
     }
     Ok(())
 }
@@ -154,5 +192,14 @@ mod tests {
         let tmp = memory_fixture();
         let err = resolve_file(tmp.path(), "NOPE.md").unwrap_err().to_string();
         assert!(err.contains("NOPE.md"), "{err}");
+    }
+
+    #[test]
+    fn editor_resolution_order_is_visual_editor_vi() {
+        assert_eq!(editor_from(Some("code -w"), Some("vim")), "code -w");
+        assert_eq!(editor_from(None, Some("vim")), "vim");
+        assert_eq!(editor_from(Some(""), Some("vim")), "vim"); // empty = unset
+        assert_eq!(editor_from(None, None), "vi");
+        assert_eq!(editor_from(None, Some("")), "vi");
     }
 }
