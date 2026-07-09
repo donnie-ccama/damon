@@ -62,7 +62,11 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), CoreError> {
     };
     let tmp = parent.join(format!(".{file_name}.damon-tmp"));
     std::fs::write(&tmp, content).map_err(|e| io(&tmp, e))?;
-    std::fs::rename(&tmp, path).map_err(|e| io(path, e))?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        // Best-effort cleanup; the rename error is still the one reported.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(io(path, e));
+    }
     Ok(())
 }
 
@@ -363,5 +367,21 @@ mod tests {
         let contents = std::fs::read_to_string(tmp.path().join("AGENTS.md")).unwrap();
         assert!(contents.contains("agent-content"));
         assert!(contents.contains("mem ory")); // path is embedded verbatim, not imported
+    }
+
+    #[test]
+    fn failed_atomic_write_cleans_up_temp_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A directory at the destination makes the rename step fail.
+        let dest = tmp.path().join("CLAUDE.md");
+        std::fs::create_dir_all(&dest).unwrap();
+        assert!(write_atomic(&dest, "content").is_err());
+        let leftovers: Vec<String> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains("damon-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 }
