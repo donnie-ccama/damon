@@ -221,12 +221,13 @@ fn update_preview(m: &mut Model, key: KeyEvent) -> Vec<Action> {
     let Some(p) = m.preview.as_mut() else {
         return Vec::new();
     };
+    let max = p.content.lines().count().saturating_sub(1) as u16;
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => m.preview = None,
         KeyCode::Up | KeyCode::Char('k') => p.scroll = p.scroll.saturating_sub(1),
-        KeyCode::Down | KeyCode::Char('j') => p.scroll = p.scroll.saturating_add(1),
+        KeyCode::Down | KeyCode::Char('j') => p.scroll = (p.scroll + 1).min(max),
         KeyCode::PageUp => p.scroll = p.scroll.saturating_sub(10),
-        KeyCode::PageDown => p.scroll = p.scroll.saturating_add(10),
+        KeyCode::PageDown => p.scroll = p.scroll.saturating_add(10).min(max),
         _ => {}
     }
     Vec::new()
@@ -363,7 +364,7 @@ mod tests {
         let mut m = Model {
             preview: Some(Preview {
                 title: "t".into(),
-                content: "c".into(),
+                content: "a\nb".into(),
                 scroll: 0,
             }),
             ..Default::default()
@@ -372,6 +373,25 @@ mod tests {
         assert_eq!(m.preview.as_ref().unwrap().scroll, 1);
         update(&mut m, &snap, key(KeyCode::Esc));
         assert!(m.preview.is_none());
+    }
+
+    #[test]
+    fn preview_scroll_is_bounded_by_content() {
+        let snap = snap_fixture();
+        let mut m = Model {
+            preview: Some(Preview {
+                title: "t".into(),
+                content: "a\nb\nc".into(), // 3 lines -> max scroll 2
+                scroll: 0,
+            }),
+            ..Default::default()
+        };
+        for _ in 0..10 {
+            update(&mut m, &snap, key(KeyCode::Char('j')));
+        }
+        assert_eq!(m.preview.as_ref().unwrap().scroll, 2);
+        update(&mut m, &snap, key(KeyCode::PageDown));
+        assert_eq!(m.preview.as_ref().unwrap().scroll, 2);
     }
 
     #[test]
