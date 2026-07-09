@@ -541,35 +541,176 @@ cleanup, `damon memory`, Homebrew packaging.
   tap step required. Source build completed in ~12s; `brew test damon`
   passed. Tap repo `donnie-ccama/homebrew-damon` at commit `9bd45bd`.
 
+### M5 — as shipped (2026-07-09)
+
+Per `docs/superpowers/specs/2026-07-09-damon-m5-design.md`: sweep the M4
+parked-debt list (six items, all cleared) and ship distribution (repo
+public, versioned Homebrew, AUR artifacts).
+
+- **Preview scroll bounded, but to content length, not viewport.**
+  `update_preview` in `crates/damon/src/tui/app.rs` computes `let max =
+  p.content.lines().count().saturating_sub(1) as u16` and clamps `Down`/
+  `j`/`PageDown` to `.min(max)`; `Up`/`PageUp` already saturated at 0.
+  This is a pure-`Model` fix — no viewport height is threaded into
+  `update_preview` — so on content taller than the pane, `max` can still
+  scroll the last line to the top of the frame; it only stops the
+  previously-unbounded runaway past the content. Documented here as the
+  intentional scope, not a bug. The existing
+  `preview_scrolls_and_escapes` fixture used 1-line content (`"a"`),
+  which the clamp would pin at `scroll = 0` forever; it was widened to
+  2-line (`"a\nb"`) so the `j`-then-`scroll == 1` assertion still holds
+  under the new clamp. A new `preview_scroll_is_bounded_by_content` test
+  covers the clamp itself.
+- **`skills/` walk stopped following symlinks.** `collect_files` in
+  `crates/damon/src/commands/memory.rs` switched from `path.is_dir()` /
+  `path.is_file()` (which follow symlinks) to `entry.file_type()?`
+  (which does not): a symlink — to a directory or a file — is neither
+  `is_dir()` nor `is_file()` under `file_type`, so it's skipped outright.
+  A self-referential symlink (`skills/loop` pointing at its own parent)
+  can no longer recurse into a cycle; it's just absent from the
+  collected files. The `damon memory` help/README text now documents
+  that symlinks under `skills/` are ignored.
+- **`KNOWN_PATTERNS` drift converted from a manual-sync liability to a
+  test failure.** `crates/damon-git/src/lib.rs` exposes `pub fn
+  known_patterns() -> &'static [&'static str]` over the existing
+  `KNOWN_PATTERNS` array. A new cross-crate integration test,
+  `crates/damon/tests/bridge_exclude_sync.rs`
+  (`known_patterns_cover_every_bridge_filename`), runs
+  `damon_core::bridge::write_bridges` for all three `RuntimeId`s
+  (`Claude`, `Codex`, `Opencode`) into a temp worktree, collects every
+  returned path relative to the worktree into a `BTreeSet`, and asserts
+  that set equals `damon_git::known_patterns()` as a set. Today the union
+  is `{CLAUDE.md, .claude/settings.json, AGENTS.md}`, matching
+  `KNOWN_PATTERNS` exactly. A future runtime that emits a new bridge
+  filename now fails this test at build time instead of silently
+  breaking legacy-line migration.
+- **`info`/`exclude` cross-process lock via `fs4`.** Added `fs4 = "0.13"`
+  ("0.13.1" resolved) to the workspace `[workspace.dependencies]` and to
+  `damon-git`, imported as `use fs4::fs_std::FileExt;` — the resolved
+  0.13 API needed no fallback to a bare `fs4::FileExt` path. Locking the
+  exclude file itself is unsafe, because `write_file`'s temp+rename
+  swaps its inode out from under any lock held on the old fd; instead a
+  private `fn with_exclude_lock<T>(common: &Path, f: impl FnOnce() ->
+  Result<T, GitError>) -> Result<T, GitError>` locks a stable sidecar,
+  `<common_dir>/info/.damon-exclude.lock` (created if absent, never
+  renamed), via `lock_exclusive()`, runs `f`, and releases via an
+  explicit `FileExt::unlock` plus drop. `common_dir` is resolved once
+  per call and threaded into the helper. Both `exclude()` and
+  `exclude_remove()` moved their full read-modify-write inside this
+  helper; the M4 NotFound-only read-error hardening is preserved
+  unchanged inside the locked section. A deterministic test spawns four
+  threads hammering a shared counter guarded by the same lock file and
+  asserts max observed concurrency is exactly 1 — proving the flock
+  contends even across separate `File` opens in-process, not just across
+  OS processes. The now-dead `exclude_path` helper (superseded by the
+  sidecar path) was deleted. Folded in the M4-parked
+  `cleanup_exclude` dedup: `crates/damon/src/commands/agent.rs` gained
+  `fn canonical_common_dir(path: &str) -> Option<PathBuf>`, used on both
+  sides of the survivor comparison; the fail-closed-on-corrupt-TOML
+  behavior (`Err(_) => true`) is unchanged.
+- **N+1 `tmux show-environment` eliminated.** The model now travels on
+  the tmux session itself as a user option, `@damon_model`, set once at
+  spawn: `crates/damon/src/commands/open.rs` calls `tmux.set_option(&name,
+  "@damon_model", key)` right after `tmux.spawn(...)` succeeds, with a
+  non-fatal warning on failure (the session is already live either way).
+  `crates/damon-tmux/src/lib.rs`'s `list_info` format string became
+  `#{session_name}|#{session_created}|#{@damon_model}`, parsed by a new
+  `parse_info_line` — an empty third field parses to `model: None`, and
+  a line missing the second (`created`) field is dropped entirely.
+  `SessionInfo` gained `pub model: Option<String>`. `Tmux::env_var` —
+  which existed only to read `DAMON_MODEL` per-session — was **removed**.
+  `live_sessions` (`crates/damon/src/tui/snapshot.rs`) now maps each
+  `SessionInfo` straight to `LiveSession { name, created_unix, model }`
+  with no per-session tmux call: one `list_info` invocation per refresh
+  regardless of session count. The `-e DAMON_MODEL=<key>` spawn env is
+  kept as-is — the running process and its hooks still read it; only the
+  TUI's listing path changed. Backward compatibility is deliberate and
+  fallback-free: tmux sessions spawned by a pre-M5 damon carry no
+  `@damon_model` and render model `?` until respawned — a fallback would
+  reintroduce the N+1 this task removes.
+- **`damon memory --edit` reachable from the TUI.**
+  `crates/damon/src/commands/memory.rs` gained `pub fn spawn_editor(path:
+  &Path) -> anyhow::Result<std::process::ExitStatus>`, extracted from the
+  CLI's `edit_file` with the `std::process::exit` call removed — it just
+  resolves `$VISUAL`/`$EDITOR`/`vi`, splits into program + args, and
+  spawns inheriting the TTY. `edit_file` is now a thin wrapper:
+  `spawn_editor` plus the same `std::process::exit(status.code()
+  .unwrap_or(1))` on non-success, so CLI behavior is byte-identical.
+  `tui/app.rs` gained `Action::Edit { path: PathBuf }`, and `Preview`
+  gained a `path: PathBuf` field (all four construction sites of
+  `Preview` were updated to carry it). Key `e` in the Memory tab emits
+  `Action::Edit` for the selected memory file, whether or not the
+  preview pane is open (previewing edits the previewed file; the list
+  view edits `agent.memory.get(m.mem_idx)`); it no-ops when nothing is
+  selected. Only `tui/mod.rs`'s event loop owns `terminal`, so
+  `Action::Edit` is intercepted there rather than in the general
+  dispatcher — the local `fn execute` was renamed to `fn execute_action`
+  and kept an exhaustive match with a no-op `Action::Edit` arm (handled
+  earlier in the loop). A new `fn suspend<T>(terminal: &mut
+  ratatui::DefaultTerminal, f: impl FnOnce() -> T) -> std::io::Result<T>`
+  does `disable_raw_mode()` + `LeaveAlternateScreen`, runs `f`, then
+  `EnterAlternateScreen` + `enable_raw_mode()` + `terminal.clear()` (full
+  redraw of the restored screen). The event loop calls `suspend(&mut
+  terminal, || memory::spawn_editor(&path))` and sets `model.status` to
+  `edited <file>` on success or an error string on failure (including a
+  non-zero editor exit), forcing a refresh either way. `crossterm` is
+  used only via ratatui's re-export (`ratatui::crossterm::{...}`) — no
+  separate `crossterm` dependency, per the M3 convention. Smoke-tested
+  manually via a pty harness (no TTY in the sandbox environment):
+  `EDITOR=true` produced `edited <path>` with a clean redraw; `EDITOR=false`
+  produced `editor exited 1`, also with a clean redraw.
+- **Distribution: repo public, versioned Homebrew, AUR authored.**
+  `donnie-ccama/damon` is now **public** (`gh repo edit --visibility
+  public`, verified). Tag `v0.1.0` points at `148566f`, the finished-code
+  `HEAD` for M5. Tap `donnie-ccama/homebrew-damon` at `6d812bc` gained a
+  versioned formula stanza (`url` pinned to the `v0.1.0` tarball, `sha256
+  afb34ba8d6d167b717b91053ac82b944f8ef6cbc5844184837950aa04968d495`,
+  computed via `shasum -a 256` on macOS) alongside the existing `head`
+  stanza; `brew audit --strict --online` is clean, a versioned install
+  (no `--HEAD`) builds keg `0.1.0`, and `brew test` passes. `docs/
+  PACKAGING.md` was rewritten for the public+versioned story (the
+  private-tap-fallback text from M4 no longer applies). AUR artifacts
+  are committed at `4db3520`: `packaging/aur/PKGBUILD`, a hand-verified
+  `.SRCINFO` (tab-indented, matching what `makepkg --printsrcinfo` would
+  emit), and `packaging/aur/PUBLISHING.md`. Per the design's explicit
+  scope line, the actual `makepkg`/`namcap`/`git push` to
+  `aur.archlinux.org` requires an Arch machine and **was not performed
+  this session** — it's recorded as a pending user handoff, not a gap in
+  the code.
+
 ### Parked debt (triaged, non-blocking)
 
-All five M3 items (tmp-file cleanup on failed atomic writes, popup
-`TestBackend` coverage, the `ensure_selection` mem_idx-reset papercut,
-the live-session-loop duplication, and the silent no-op on `N` with an
-empty rail) shipped in M4 Tasks 1–5 and are cleared. Newly parked during
-M4, all non-blocking, are M5 candidates:
+All six M4 items (the `info`/`exclude` cross-process lock, the
+`KNOWN_PATTERNS` manual-sync liability, the `skills/` symlink-cycle
+guard, the `cleanup_exclude` dedup, the N+1 `tmux show-environment`
+calls, and unbounded preview scroll) shipped in M5 and are cleared.
+Newly parked during M5, all non-blocking:
 
-- No cross-process lock on the `info`/`exclude` read-modify-write: two
-  concurrent `damon open`s against the same repo can lose one update
-  (the temp-file+rename pattern only guarantees single-writer atomicity,
-  not mutual exclusion across processes). Self-heals on the next spawn,
-  since bridges and the exclude block regenerate every `open` — revisit
-  only if parallel opens become a routine workflow.
-- `KNOWN_PATTERNS` in `damon-git` is a manually-synced list of bridge
-  filenames; a future runtime that introduces a new bridge filename must
-  add it there for legacy-line migration to pick it up.
-- The `skills/` recursive walk in `commands/memory.rs` follows
-  symlinked directories with no cycle guard.
-- `cleanup_exclude` duplicates the expand-tilde → `common_dir` →
-  `canonicalize` chain twice (once per comparison side) — a helper-
-  extraction candidate, not a correctness issue.
-- Carried from the M3 final review, still unaddressed: N+1
-  `tmux show-environment` calls per TUI refresh at scale; unbounded
-  preview scroll in the Memory tab.
+- No unit test for the preview-mode `e` edit path — `Action::Edit`
+  emission from the Memory-tab list view is covered by a `Model`/update
+  test, but editing while the preview pane is open is verified only by
+  the manual pty smoke test (`EDITOR=true`/`EDITOR=false`), since the
+  suspend/resume path isn't `TestBackend`-testable.
+- `suspend()` (`crates/damon/src/tui/mod.rs`) returns early on an IO
+  error from `execute!(stdout(), LeaveAlternateScreen)` with raw mode
+  already disabled — a residual inconsistent-terminal-state risk on that
+  specific failure, accepted per the brief as out of scope for this
+  milestone.
+- Preview content goes stale after an in-place edit: editing the
+  previewed file via `e` does not refresh `Preview.content`, so the pane
+  shows pre-edit text until closed and reopened.
+- AUR live publish (`makepkg`/`namcap`/`git push` to
+  `aur.archlinux.org`) is authored and ready but not executed — it's a
+  documented on-Arch handoff to the user (macOS cannot run those tools).
 
 ### Next milestone
 
-**M5 candidates:** a versioned Homebrew release (cut tag `v0.1.0`, add a
-`url`/`sha256` formula stanza, or go public); wiring `damon memory --edit`
-into the TUI via the same print-free core; `info`/`exclude` read-modify-
-write locking (above); AUR packaging.
+**M6 candidates:** the on-Arch AUR publish (above); viewport-aware
+preview scrolling (thread pane height into `update_preview` so the
+content-length clamp also accounts for what's visible, closing the
+divergence noted in the M5 entry above); live-refreshing preview content
+after an in-place `e` edit; hardening `suspend()`'s early-return path so
+a `LeaveAlternateScreen` failure can't leave the terminal in a mixed
+raw/alternate-screen state; a `TestBackend`-reachable test for the
+preview-mode `e` path if a way to fake the suspend/resume boundary
+emerges.
