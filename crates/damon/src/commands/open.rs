@@ -110,6 +110,13 @@ pub fn open_session(
             tmux.kill(&name).ok(); // clean up any half-created session
             return Err(e.into());
         }
+        // Surface the model in `list-sessions -F` so the TUI reads all models
+        // in one call instead of one show-environment per session.
+        if let Err(e) = tmux.set_option(&name, "@damon_model", key) {
+            warnings.push(format!(
+                "could not tag session model ({e}); it will render as ?"
+            ));
+        }
 
         let event = SessionEvent {
             ts: chrono::Utc::now(),

@@ -116,19 +116,18 @@ impl Snapshot {
     }
 }
 
-/// One LiveSession per tmux session, with its DAMON_MODEL when readable.
-/// Shared by the production event loop and tests — one loop, two callers.
+/// One LiveSession per tmux session. The model comes from the single
+/// list_info call (`@damon_model` user option) — no per-session tmux call.
 pub fn live_sessions(tmux: &Tmux) -> Result<Vec<LiveSession>, damon_tmux::TmuxError> {
-    let mut live = Vec::new();
-    for info in tmux.list_info()? {
-        let model = tmux.env_var(&info.name, "DAMON_MODEL").ok().flatten();
-        live.push(LiveSession {
+    Ok(tmux
+        .list_info()?
+        .into_iter()
+        .map(|info| LiveSession {
             name: info.name,
             created_unix: info.created_unix,
-            model,
-        });
-    }
-    Ok(live)
+            model: info.model,
+        })
+        .collect())
 }
 
 /// AGENT/USER/MEMORY plus skills/*/SKILL.md, stable order.
@@ -283,6 +282,8 @@ mod tests {
             &["sleep".to_string(), "30".to_string()],
         )
         .unwrap();
+        tmux.set_option("damon_newsletter_scout_1", "@damon_model", "claude")
+            .unwrap();
 
         let live = live_sessions(tmux).unwrap();
         let snap = Snapshot::build(&store, &live, &ModelsFile::default()).unwrap();

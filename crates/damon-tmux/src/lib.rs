@@ -35,6 +35,8 @@ fn display_args(args: &[String]) -> String {
 pub struct SessionInfo {
     pub name: String,
     pub created_unix: i64,
+    /// The `@damon_model` user option, if set at spawn.
+    pub model: Option<String>,
 }
 
 pub struct Tmux {
@@ -124,18 +126,13 @@ impl Tmux {
         Ok(())
     }
 
-    /// Sessions with creation time (unix seconds). Missing server = empty.
-    ///
-    /// Uses `|` (not `\t`) as the field separator: tmux 3.7b silently
-    /// rewrites embedded tab bytes in `-F` output to `_`, which is
-    /// indistinguishable from underscores already used in session names
-    /// (e.g. `damon_team_agent_1`). Verified with `tmux -F $'...\t...'`
-    /// bypassing shell quoting; `|` passes through unmodified.
+    /// Sessions with creation time and the `@damon_model` user option.
+    /// Missing server = empty. `|` separator (tmux 3.7b mangles `\t` in `-F`).
     pub fn list_info(&self) -> Result<Vec<SessionInfo>, TmuxError> {
         let args: Vec<String> = vec![
             "list-sessions".into(),
             "-F".into(),
-            "#{session_name}|#{session_created}".into(),
+            "#{session_name}|#{session_created}|#{@damon_model}".into(),
         ];
         let out = match self.run(&args) {
             Ok(out) => out,
@@ -146,39 +143,34 @@ impl Tmux {
             }
             Err(e) => return Err(e),
         };
-        Ok(out
-            .lines()
-            .filter_map(|l| {
-                let (name, created) = l.split_once('|')?;
-                Some(SessionInfo {
-                    name: name.to_string(),
-                    created_unix: created.parse().ok()?,
-                })
-            })
-            .collect())
+        Ok(out.lines().filter_map(parse_info_line).collect())
     }
 
-    /// One variable from the session's environment (set at spawn via `-e`).
-    pub fn env_var(&self, session: &str, var: &str) -> Result<Option<String>, TmuxError> {
-        let args: Vec<String> = vec![
-            "show-environment".into(),
+    /// Set a tmux option on a session (used for `@damon_model` at spawn).
+    pub fn set_option(&self, session: &str, name: &str, value: &str) -> Result<(), TmuxError> {
+        self.run(&[
+            "set-option".into(),
             "-t".into(),
             session.into(),
-            var.into(),
-        ];
-        match self.run(&args) {
-            Ok(out) => Ok(out
-                .lines()
-                .next()
-                .and_then(|l| l.split_once('='))
-                .map(|(_, v)| v.to_string())),
-            // tmux exits nonzero for an unknown variable.
-            Err(TmuxError::Failed { stderr, .. }) if stderr.contains("unknown variable") => {
-                Ok(None)
-            }
-            Err(e) => Err(e),
-        }
+            name.into(),
+            value.into(),
+        ])?;
+        Ok(())
     }
+}
+
+/// Parse one `#{session_name}|#{session_created}|#{@damon_model}` line.
+/// An empty model field (unset user option) becomes `None`.
+fn parse_info_line(line: &str) -> Option<SessionInfo> {
+    let mut parts = line.split('|');
+    let name = parts.next()?.to_string();
+    let created_unix = parts.next()?.parse().ok()?;
+    let model = parts.next().filter(|m| !m.is_empty()).map(str::to_string);
+    Some(SessionInfo {
+        name,
+        created_unix,
+        model,
+    })
 }
 
 /// Parse `tmux -V` (e.g. "tmux 3.4", "tmux 3.3a") into (major, minor).
@@ -196,5 +188,33 @@ pub fn version() -> Result<(u32, u32), TmuxError> {
     match (major, minor) {
         (Some(ma), Some(mi)) => Ok((ma, mi)),
         _ => Err(TmuxError::Version(text)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_three_field_lines_with_optional_model() {
+        assert_eq!(
+            parse_info_line("damon_a_b_1|1700000000|claude"),
+            Some(SessionInfo {
+                name: "damon_a_b_1".into(),
+                created_unix: 1_700_000_000,
+                model: Some("claude".into()),
+            })
+        );
+        // Unset @damon_model renders as an empty trailing field.
+        assert_eq!(
+            parse_info_line("damon_a_b_1|1700000000|"),
+            Some(SessionInfo {
+                name: "damon_a_b_1".into(),
+                created_unix: 1_700_000_000,
+                model: None,
+            })
+        );
+        // Missing created field -> unparseable -> dropped.
+        assert_eq!(parse_info_line("weird-line"), None);
     }
 }
