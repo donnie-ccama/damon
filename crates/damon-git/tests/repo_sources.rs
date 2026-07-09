@@ -91,20 +91,92 @@ fn worktree_add_attaches_existing_branch_and_reports_real_errors() {
     assert!(err.to_string().contains("add -b agent/other"), "got: {err}");
 }
 
+fn exclude_file(repo: &Path) -> std::path::PathBuf {
+    let common = git(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    Path::new(&common).join("info/exclude")
+}
+
 #[test]
-fn exclude_appends_once_to_common_dir() {
+fn exclude_writes_marked_block_idempotently() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    damon_git::exclude(&wt, &["CLAUDE.md", ".claude/settings.json"]).unwrap();
+    let first = std::fs::read_to_string(exclude_file(&wt)).unwrap();
+    assert!(first.contains("# damon begin\nCLAUDE.md\n.claude/settings.json\n# damon end\n"));
+    damon_git::exclude(&wt, &["CLAUDE.md", ".claude/settings.json"]).unwrap();
+    let second = std::fs::read_to_string(exclude_file(&wt)).unwrap();
+    assert_eq!(first, second); // byte-identical on repeat
+    assert_eq!(first.matches("# damon begin").count(), 1);
+}
+
+#[test]
+fn exclude_merges_entries_across_calls() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    damon_git::exclude(&wt, &["CLAUDE.md"]).unwrap();
+    damon_git::exclude(&wt, &["AGENTS.md"]).unwrap();
+    let text = std::fs::read_to_string(exclude_file(&wt)).unwrap();
+    assert!(text.contains("# damon begin\nCLAUDE.md\nAGENTS.md\n# damon end\n"));
+    assert_eq!(text.matches("# damon begin").count(), 1);
+}
+
+#[test]
+fn exclude_preserves_user_lines_and_migrates_legacy_damon_lines() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    let file = exclude_file(&wt);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    // A user pattern plus a pre-M4 unmarked damon line.
+    std::fs::write(&file, "user-pattern\nCLAUDE.md\n").unwrap();
+    damon_git::exclude(&wt, &["CLAUDE.md"]).unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.starts_with("user-pattern\n"), "{text:?}");
+    // Legacy line absorbed into the block — exactly one CLAUDE.md remains.
+    assert_eq!(text.matches("CLAUDE.md").count(), 1);
+    assert!(text.contains("# damon begin\nCLAUDE.md\n# damon end\n"));
+}
+
+#[test]
+fn exclude_remove_deletes_only_the_block() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    let file = exclude_file(&wt);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "user-pattern\n").unwrap();
+    damon_git::exclude(&wt, &["CLAUDE.md", "AGENTS.md"]).unwrap();
+    damon_git::exclude_remove(&wt).unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(text, "user-pattern\n");
+}
+
+#[test]
+fn exclude_remove_without_exclude_file_is_ok() {
+    isolate_git();
+    let tmp = tempfile::tempdir().unwrap();
+    let wt = tmp.path().join("repo");
+    damon_git::init_new(&wt, "main").unwrap();
+    damon_git::exclude_remove(&wt).unwrap(); // file never written — no error
+}
+
+#[test]
+fn common_dir_matches_for_source_repo_and_its_worktree() {
     isolate_git();
     let tmp = tempfile::tempdir().unwrap();
     let origin = seed_origin(tmp.path());
-    let wt = tmp.path().join("worktree");
+    let wt = tmp.path().join("wt");
     damon_git::worktree_add(&origin, &wt, "agent/scout").unwrap();
-    damon_git::exclude(&wt, &["CLAUDE.md"]).unwrap();
-    damon_git::exclude(&wt, &["CLAUDE.md"]).unwrap(); // idempotent
-    let common = git(
-        &wt,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    );
-    let text = std::fs::read_to_string(Path::new(&common).join("info/exclude")).unwrap();
-    assert_eq!(text.matches("CLAUDE.md").count(), 1);
-    assert_eq!(git(&wt, &["status", "--porcelain"]), ""); // bridge file invisible
+    let a = damon_git::common_dir(&origin).unwrap();
+    let b = damon_git::common_dir(&wt).unwrap();
+    assert_eq!(a.canonicalize().unwrap(), b.canonicalize().unwrap());
 }
