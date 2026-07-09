@@ -182,3 +182,50 @@ fn agent_rm_cleans_exclude_block_after_last_worktree_agent() {
         .success();
     assert_eq!(std::fs::read_to_string(&exclude).unwrap(), "user-pattern\n");
 }
+
+#[test]
+fn agent_rm_skips_exclude_cleanup_when_survivor_toml_is_corrupt() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), &["init", "-b", "main"]);
+    git(project.path(), &["config", "user.email", "t@example.com"]);
+    git(project.path(), &["config", "user.name", "t"]);
+    std::fs::write(project.path().join("README.md"), "x").unwrap();
+    git(project.path(), &["add", "-A"]);
+    git(project.path(), &["commit", "-m", "seed"]);
+    let exclude = project.path().join(".git/info/exclude");
+
+    damon(root.path(), cfg.path())
+        .args(["team", "new", "Web"])
+        .assert()
+        .success();
+    for name in ["web/A", "web/B"] {
+        damon(root.path(), cfg.path())
+            .args([
+                "agent",
+                "new",
+                name,
+                "--repo-worktree",
+                project.path().to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+    }
+    let wt_a = root.path().join("teams/web/agents/a/worktree");
+    damon_git::exclude(&wt_a, &["CLAUDE.md"]).unwrap();
+    // Corrupt the SURVIVOR's agent.toml, then remove the other agent.
+    std::fs::write(
+        root.path().join("teams/web/agents/b/agent.toml"),
+        "not [valid",
+    )
+    .unwrap();
+    damon(root.path(), cfg.path())
+        .args(["agent", "rm", "web/a", "--yes"])
+        .assert()
+        .success();
+    // Fail closed: block must survive because b might still need it.
+    assert!(std::fs::read_to_string(&exclude)
+        .unwrap()
+        .contains("# damon begin"));
+}

@@ -184,16 +184,21 @@ fn cleanup_exclude(store: &Store, project: &str) {
         }
     };
     let still_used = store.all_agents().unwrap_or_default().iter().any(|a| {
-        a.agent.as_ref().ok().is_some_and(|f| {
-            f.repo.source == RepoSource::Worktree
-                && f.repo.path.as_deref().is_some_and(|p| {
-                    expand_tilde(p)
-                        .ok()
-                        .and_then(|p| damon_git::common_dir(&p).ok())
-                        .and_then(|c| c.canonicalize().ok())
-                        .is_some_and(|c| c == target)
-                })
-        })
+        match a.agent.as_ref() {
+            // Unreadable agent.toml: we cannot rule this agent out, so treat
+            // it as still using the repo (stale block beats broken exclusions).
+            Err(_) => true,
+            Ok(f) => {
+                f.repo.source == RepoSource::Worktree
+                    && f.repo.path.as_deref().is_some_and(|p| {
+                        expand_tilde(p)
+                            .ok()
+                            .and_then(|p| damon_git::common_dir(&p).ok())
+                            .and_then(|c| c.canonicalize().ok())
+                            .is_some_and(|c| c == target)
+                    })
+            }
+        }
     });
     if still_used {
         return;
