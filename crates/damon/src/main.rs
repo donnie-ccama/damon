@@ -48,6 +48,14 @@ enum Cmd {
     Sessions,
     /// Kill a session by name, or all of an agent's sessions
     Kill { target: String },
+    /// Print an agent's memory files (all, or one FILE); --edit opens your editor
+    Memory {
+        reference: String,
+        /// Path relative to the memory dir, e.g. MEMORY.md or skills/x/SKILL.md
+        file: Option<String>,
+        #[arg(long)]
+        edit: bool,
+    },
     /// Internal: hooks invoked by agent runtimes (e.g. Claude Code's Stop hook)
     #[command(hide = true)]
     Hook {
@@ -175,6 +183,11 @@ fn run(cmd: Cmd) -> anyhow::Result<()> {
         } => commands::open::run(&reference, model.as_deref(), new),
         Cmd::Sessions => commands::sessions::ls(),
         Cmd::Kill { target } => commands::sessions::kill(&target),
+        Cmd::Memory {
+            reference,
+            file,
+            edit,
+        } => commands::memory::run(&reference, file.as_deref(), edit),
         Cmd::Hook { cmd } => match cmd {
             HookCmd::Reflect => commands::hook::reflect(),
         },
