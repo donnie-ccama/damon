@@ -178,7 +178,8 @@ fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>)
 
 fn render_status(f: &mut Frame, area: Rect, m: &Model) {
     let text = m.status.clone().unwrap_or_else(|| {
-        "n new session · Enter open · x kill · N new agent · Tab/m tabs · q quit".to_string()
+        "n new session · Enter open · e edit · x kill · N new agent · Tab/m tabs · q quit"
+            .to_string()
     });
     f.render_widget(Paragraph::new(text), area);
 }
@@ -365,6 +366,7 @@ mod tests {
             title: "AGENT.md".into(),
             content: "hello memory".into(),
             scroll: 0,
+            path: "/mem/AGENT.md".into(),
         });
         let text = rendered(&m, &snap());
         assert!(text.contains("hello memory"));

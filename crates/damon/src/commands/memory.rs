@@ -108,20 +108,26 @@ fn editor_from(visual: Option<&str>, editor: Option<&str>) -> String {
         .unwrap_or_else(|| "vi".to_string())
 }
 
-/// Spawn the editor inheriting the TTY; damon exits with the editor's code.
-/// Editor values may carry flags ("code -w"), so split on whitespace.
-fn edit_file(path: &Path) -> anyhow::Result<()> {
+/// Spawn the editor inheriting the TTY and return its exit status. No
+/// `process::exit` — safe to call from the TUI. Editor values may carry
+/// flags ("code -w"), so split on whitespace.
+pub fn spawn_editor(path: &Path) -> anyhow::Result<std::process::ExitStatus> {
     let editor = editor_from(
         std::env::var("VISUAL").ok().as_deref(),
         std::env::var("EDITOR").ok().as_deref(),
     );
     let mut parts = editor.split_whitespace();
     let program = parts.next().expect("editor_from never returns empty");
-    let status = std::process::Command::new(program)
+    std::process::Command::new(program)
         .args(parts)
         .arg(path)
         .status()
-        .map_err(|e| anyhow::anyhow!("cannot launch editor {editor:?}: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("cannot launch editor {editor:?}: {e}"))
+}
+
+/// CLI edit: run the editor, and propagate its exit code to damon's own.
+fn edit_file(path: &Path) -> anyhow::Result<()> {
+    let status = spawn_editor(path)?;
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
     }

@@ -12,7 +12,12 @@ use damon_core::models::ModelsFile;
 use damon_core::store::Store;
 use damon_tmux::Tmux;
 use ratatui::crossterm::event::KeyCode;
+use ratatui::crossterm::execute;
+use ratatui::crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use snapshot::Snapshot;
+use std::io::stdout;
 use std::io::IsTerminal;
 use std::time::Duration;
 
@@ -42,10 +47,26 @@ fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow
         match &world {
             Ok(snap) => {
                 for action in app::update(&mut model, snap, ev) {
-                    if execute(action, &mut model) {
-                        return Ok(());
+                    match action {
+                        Action::Edit { path } => {
+                            let status = match suspend(&mut terminal, || {
+                                crate::commands::memory::spawn_editor(&path)
+                            }) {
+                                Ok(Ok(s)) if s.success() => format!("edited {}", path.display()),
+                                Ok(Ok(s)) => format!("editor exited {}", s.code().unwrap_or(-1)),
+                                Ok(Err(e)) => format!("error: {e:#}"),
+                                Err(e) => format!("error: {e}"),
+                            };
+                            model.status = Some(status);
+                            refresh = true;
+                        }
+                        other => {
+                            if execute_action(other, &mut model) {
+                                return Ok(());
+                            }
+                            refresh = true;
+                        }
                     }
-                    refresh = true;
                 }
             }
             Err(_) => {
@@ -75,8 +96,23 @@ fn load_world(config: &Config) -> Result<Snapshot, String> {
     inner().map_err(|e| format!("{e:#}"))
 }
 
+/// Leave the alternate screen + raw mode, run `f` (e.g. an editor) against the
+/// real terminal, then restore the TUI and force a full redraw.
+fn suspend<T>(
+    terminal: &mut ratatui::DefaultTerminal,
+    f: impl FnOnce() -> T,
+) -> std::io::Result<T> {
+    disable_raw_mode()?;
+    execute!(stdout(), LeaveAlternateScreen)?;
+    let out = f();
+    execute!(stdout(), EnterAlternateScreen)?;
+    enable_raw_mode()?;
+    terminal.clear()?;
+    Ok(out)
+}
+
 /// Run one Action through the same cores the CLI verbs use. Returns true on quit.
-fn execute(action: Action, m: &mut Model) -> bool {
+fn execute_action(action: Action, m: &mut Model) -> bool {
     match action {
         Action::Quit => return true,
         Action::Open {
@@ -123,10 +159,12 @@ fn execute(action: Action, m: &mut Model) -> bool {
                     title,
                     content,
                     scroll: 0,
+                    path,
                 })
             }
             Err(e) => m.status = Some(format!("error: {}: {e}", path.display())),
         },
+        Action::Edit { .. } => {} // handled in event_loop before execute_action
     }
     false
 }

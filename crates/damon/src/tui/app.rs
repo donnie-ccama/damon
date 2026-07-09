@@ -47,6 +47,9 @@ pub enum Action {
         title: String,
         path: PathBuf,
     },
+    Edit {
+        path: PathBuf,
+    },
     Quit,
 }
 
@@ -55,6 +58,7 @@ pub struct Preview {
     pub title: String,
     pub content: String,
     pub scroll: u16,
+    pub path: PathBuf,
 }
 
 #[derive(Default)]
@@ -153,6 +157,7 @@ pub fn update(m: &mut Model, snap: &Snapshot, ev: Event) -> Vec<Action> {
             }
         }
         KeyCode::Char('m') => m.tab = Tab::Memory,
+        KeyCode::Char('e') if m.tab == Tab::Memory => return edit_selected(m, snap),
         KeyCode::Enter => return on_enter(m, snap),
         KeyCode::Char('n') => {
             if let (Some(reference), false) = (reference(m), snap.models.is_empty()) {
@@ -217,6 +222,18 @@ fn on_enter(m: &mut Model, snap: &Snapshot) -> Vec<Action> {
     }
 }
 
+fn edit_selected(m: &Model, snap: &Snapshot) -> Vec<Action> {
+    let Some(agent) = m.selected_agent(snap) else {
+        return Vec::new();
+    };
+    let Some(file) = agent.memory.get(m.mem_idx) else {
+        return Vec::new();
+    };
+    vec![Action::Edit {
+        path: file.path.clone(),
+    }]
+}
+
 fn update_preview(m: &mut Model, key: KeyEvent) -> Vec<Action> {
     let Some(p) = m.preview.as_mut() else {
         return Vec::new();
@@ -228,6 +245,11 @@ fn update_preview(m: &mut Model, key: KeyEvent) -> Vec<Action> {
         KeyCode::Down | KeyCode::Char('j') => p.scroll = (p.scroll + 1).min(max),
         KeyCode::PageUp => p.scroll = p.scroll.saturating_sub(10),
         KeyCode::PageDown => p.scroll = p.scroll.saturating_add(10).min(max),
+        KeyCode::Char('e') => {
+            return vec![Action::Edit {
+                path: p.path.clone(),
+            }]
+        }
         _ => {}
     }
     Vec::new()
@@ -366,6 +388,7 @@ mod tests {
                 title: "t".into(),
                 content: "a\nb".into(),
                 scroll: 0,
+                path: "/mem/AGENT.md".into(),
             }),
             ..Default::default()
         };
@@ -383,6 +406,7 @@ mod tests {
                 title: "t".into(),
                 content: "a\nb\nc".into(), // 3 lines -> max scroll 2
                 scroll: 0,
+                path: "/mem/AGENT.md".into(),
             }),
             ..Default::default()
         };
@@ -392,6 +416,32 @@ mod tests {
         assert_eq!(m.preview.as_ref().unwrap().scroll, 2);
         update(&mut m, &snap, key(KeyCode::PageDown));
         assert_eq!(m.preview.as_ref().unwrap().scroll, 2);
+    }
+
+    #[test]
+    fn e_on_memory_file_emits_edit_action() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, key(KeyCode::Char('j'))); // select scout
+        update(&mut m, &snap, key(KeyCode::Char('m'))); // Memory tab
+        let actions = update(&mut m, &snap, key(KeyCode::Char('e')));
+        assert_eq!(
+            actions,
+            vec![Action::Edit {
+                path: "/mem/AGENT.md".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn e_with_no_memory_file_does_nothing() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        // 'writer' (second agent) has an empty memory list in the fixture.
+        update(&mut m, &snap, key(KeyCode::Char('j'))); // scout
+        update(&mut m, &snap, key(KeyCode::Char('j'))); // writer
+        update(&mut m, &snap, key(KeyCode::Char('m'))); // Memory tab
+        assert_eq!(update(&mut m, &snap, key(KeyCode::Char('e'))), vec![]);
     }
 
     #[test]
