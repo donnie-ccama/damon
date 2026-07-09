@@ -2,6 +2,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use fs4::fs_std::FileExt;
+
 #[derive(thiserror::Error, Debug)]
 pub enum GitError {
     #[error("failed to run git: {0}")]
@@ -96,8 +98,37 @@ pub fn common_dir(path: &Path) -> Result<PathBuf, GitError> {
     Ok(PathBuf::from(out))
 }
 
-fn exclude_path(repo: &Path) -> Result<PathBuf, GitError> {
-    Ok(common_dir(repo)?.join("info").join("exclude"))
+/// Run `f` while holding an exclusive advisory lock scoped to this repo's
+/// exclude file, so two concurrent `damon open`s cannot lose an update. The
+/// lock lives on a stable sidecar file (never renamed) — locking the exclude
+/// file itself is unsound because `write_file` swaps its inode via rename.
+/// flock is released on fd close, so a crash leaves no stale lock.
+fn with_exclude_lock<T>(
+    common: &Path,
+    f: impl FnOnce() -> Result<T, GitError>,
+) -> Result<T, GitError> {
+    let info = common.join("info");
+    std::fs::create_dir_all(&info).map_err(|source| GitError::Io {
+        path: info.clone(),
+        source,
+    })?;
+    let lock_path = info.join(".damon-exclude.lock");
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| GitError::Io {
+            path: lock_path.clone(),
+            source,
+        })?;
+    lock.lock_exclusive().map_err(|source| GitError::Io {
+        path: lock_path.clone(),
+        source,
+    })?;
+    let result = f();
+    let _ = FileExt::unlock(&lock); // also released on drop
+    result
 }
 
 /// Ensure `entries` are ignored via a sentinel-delimited block in
@@ -106,57 +137,57 @@ fn exclude_path(repo: &Path) -> Result<PathBuf, GitError> {
 /// A missing exclude file starts empty; any other read error propagates
 /// rather than risking a clobber.
 pub fn exclude(worktree: &Path, entries: &[&str]) -> Result<(), GitError> {
-    let path = exclude_path(worktree)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| GitError::Io {
-            path: parent.to_path_buf(),
-            source,
-        })?;
-    }
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => {
-            return Err(GitError::Io {
-                path: path.clone(),
-                source: e,
-            })
+    let common = common_dir(worktree)?;
+    with_exclude_lock(&common, || {
+        let path = common.join("info").join("exclude");
+        let existing = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(GitError::Io {
+                    path: path.clone(),
+                    source: e,
+                })
+            }
+        };
+        let updated = upsert_block(&existing, entries);
+        if updated != existing {
+            write_file(&path, &updated)?;
         }
-    };
-    let updated = upsert_block(&existing, entries);
-    if updated != existing {
-        write_file(&path, &updated)?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Remove damon's block (and any legacy damon lines). `repo` is any path
 /// inside the repo — the source project dir works after the agent worktree
 /// is gone. A missing exclude file is a no-op; any other read error propagates.
 pub fn exclude_remove(repo: &Path) -> Result<(), GitError> {
-    let path = exclude_path(repo)?;
-    let existing = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => {
-            return Err(GitError::Io {
-                path: path.clone(),
-                source: e,
-            })
+    let common = common_dir(repo)?;
+    with_exclude_lock(&common, || {
+        let path = common.join("info").join("exclude");
+        let existing = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(GitError::Io {
+                    path: path.clone(),
+                    source: e,
+                })
+            }
+        };
+        let (before, _block, after) = split_block(&existing);
+        let mut out = String::new();
+        for l in before.iter().chain(after.iter()) {
+            if !KNOWN_PATTERNS.contains(&l.trim()) {
+                out.push_str(l);
+                out.push('\n');
+            }
         }
-    };
-    let (before, _block, after) = split_block(&existing);
-    let mut out = String::new();
-    for l in before.iter().chain(after.iter()) {
-        if !KNOWN_PATTERNS.contains(&l.trim()) {
-            out.push_str(l);
-            out.push('\n');
+        if out != existing {
+            write_file(&path, &out)?;
         }
-    }
-    if out != existing {
-        write_file(&path, &out)?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// (lines before the block, lines inside it, lines after it).
@@ -228,4 +259,44 @@ fn write_file(path: &Path, content: &str) -> Result<(), GitError> {
         return Err(io(path, e));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn exclude_lock_serializes_critical_sections() {
+        let tmp = tempfile::tempdir().unwrap();
+        let common = tmp.path().to_path_buf();
+        let inside = Arc::new(AtomicUsize::new(0));
+        let max = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let (common, inside, max) = (common.clone(), inside.clone(), max.clone());
+            handles.push(std::thread::spawn(move || {
+                for _ in 0..25 {
+                    with_exclude_lock(&common, || {
+                        let n = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                        max.fetch_max(n, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_micros(200));
+                        inside.fetch_sub(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        // With a real flock, at most one thread is ever inside the closure.
+        assert_eq!(
+            max.load(Ordering::SeqCst),
+            1,
+            "critical sections overlapped"
+        );
+    }
 }

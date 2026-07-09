@@ -3,6 +3,7 @@ use damon_core::entity::{AgentFile, AgentSection, RepoSection, RepoSource, Runti
 use damon_core::memory::scaffold_memory;
 use damon_core::slug::Slug;
 use damon_core::store::Store;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoArg {
@@ -166,22 +167,23 @@ pub fn rm(reference: &str, yes: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Drop damon's info/exclude block once the last worktree agent for a repo is
-/// gone. Warn-and-continue throughout: cleanup must never block removal.
-fn cleanup_exclude(store: &Store, project: &str) {
-    let target = match expand_tilde(project)
+/// expand-tilde -> git common dir -> canonicalized, or None if any step fails.
+fn canonical_common_dir(path: &str) -> Option<PathBuf> {
+    expand_tilde(path)
         .ok()
         .and_then(|p| damon_git::common_dir(&p).ok())
         .and_then(|c| c.canonicalize().ok())
-    {
-        Some(c) => c,
-        None => {
-            eprintln!(
-                "warning: cannot resolve {project:?} for info/exclude cleanup; \
-                 remove the damon block manually if it lingers"
-            );
-            return;
-        }
+}
+
+/// Drop damon's info/exclude block once the last worktree agent for a repo is
+/// gone. Warn-and-continue throughout: cleanup must never block removal.
+fn cleanup_exclude(store: &Store, project: &str) {
+    let Some(target) = canonical_common_dir(project) else {
+        eprintln!(
+            "warning: cannot resolve {project:?} for info/exclude cleanup; \
+             remove the damon block manually if it lingers"
+        );
+        return;
     };
     let still_used = store.all_agents().unwrap_or_default().iter().any(|a| {
         match a.agent.as_ref() {
@@ -190,13 +192,11 @@ fn cleanup_exclude(store: &Store, project: &str) {
             Err(_) => true,
             Ok(f) => {
                 f.repo.source == RepoSource::Worktree
-                    && f.repo.path.as_deref().is_some_and(|p| {
-                        expand_tilde(p)
-                            .ok()
-                            .and_then(|p| damon_git::common_dir(&p).ok())
-                            .and_then(|c| c.canonicalize().ok())
-                            .is_some_and(|c| c == target)
-                    })
+                    && f.repo
+                        .path
+                        .as_deref()
+                        .and_then(canonical_common_dir)
+                        .is_some_and(|c| c == target)
             }
         }
     });
