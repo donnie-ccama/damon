@@ -16,6 +16,11 @@ session cortado_newsletter_scout_1        ← tmux session, spawned in the agent
                                         ← a Ghostty window opens with Claude Code running
 ```
 
+> **New to cortado?** Open the no-jargon guided tour —
+> [docs/slides/cortado-guide.html](docs/slides/cortado-guide.html) — in any
+> browser: what cortado is, how it works, and the handful of commands you'll
+> actually use.
+
 ## Features
 
 - **Persistent agent identities** — an agent is a folder: `agent.toml`
