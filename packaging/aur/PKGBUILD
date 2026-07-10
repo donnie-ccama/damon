@@ -1,24 +1,24 @@
 # Maintainer: Donnie Lane <donnie@citykid.me>
-pkgname=damon
+pkgname=cortado
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Orchestrator for persistent coding agents"
 arch=('x86_64' 'aarch64')
-url="https://github.com/donnie-ccama/damon"
+url="https://github.com/donnie-ccama/cortado"
 license=('MIT' 'Apache-2.0')
 depends=('git' 'tmux')
 makedepends=('cargo')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/donnie-ccama/damon/archive/refs/tags/v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/donnie-ccama/cortado/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('afb34ba8d6d167b717b91053ac82b944f8ef6cbc5844184837950aa04968d495')
 
 build() {
   cd "$pkgname-$pkgver"
-  cargo build --release --locked --package damon
+  cargo build --release --locked --package cortado
 }
 
 package() {
   cd "$pkgname-$pkgver"
-  install -Dm755 "target/release/damon" "$pkgdir/usr/bin/damon"
+  install -Dm755 "target/release/cortado" "$pkgdir/usr/bin/cortado"
   install -Dm644 "LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm644 "LICENSE-APACHE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
 }

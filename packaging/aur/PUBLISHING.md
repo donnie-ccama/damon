@@ -1,4 +1,4 @@
-# Publishing damon to the AUR
+# Publishing cortado to the AUR
 
 These steps run on an Arch Linux machine (macOS cannot run `makepkg`/
 `namcap`). Artifacts in this directory (`PKGBUILD`, `.SRCINFO`) are the
@@ -10,21 +10,21 @@ source of truth — copy them into the AUR git checkout.
 - `base-devel` installed (`pacman -S --needed base-devel`).
 
 ## Build + lint locally
-    mkdir -p /tmp/damon-aur && cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO /tmp/damon-aur/
-    cd /tmp/damon-aur
+    mkdir -p /tmp/cortado-aur && cp packaging/aur/PKGBUILD packaging/aur/.SRCINFO /tmp/cortado-aur/
+    cd /tmp/cortado-aur
     makepkg -si            # builds from the release tarball and installs
-    damon --version        # expect: damon 0.1.0
+    cortado --version        # expect: cortado 0.1.0
     namcap PKGBUILD
-    namcap damon-0.1.0-1-*.pkg.tar.zst
+    namcap cortado-0.1.0-1-*.pkg.tar.zst
     # If makepkg regenerated fields, refresh .SRCINFO:
     makepkg --printsrcinfo > .SRCINFO
 
 ## First publish (new package)
-    git clone ssh://aur@aur.archlinux.org/damon.git aur-damon
-    cd aur-damon
-    cp /tmp/damon-aur/PKGBUILD /tmp/damon-aur/.SRCINFO .
+    git clone ssh://aur@aur.archlinux.org/cortado.git aur-cortado
+    cd aur-cortado
+    cp /tmp/cortado-aur/PKGBUILD /tmp/cortado-aur/.SRCINFO .
     git add PKGBUILD .SRCINFO
-    git commit -m "damon 0.1.0"
+    git commit -m "cortado 0.1.0"
     git push
 
 ## Updating (later releases)

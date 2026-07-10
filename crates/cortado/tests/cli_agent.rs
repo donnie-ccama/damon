@@ -1,0 +1,231 @@
+use assert_cmd::Command;
+use predicates::str::contains;
+use std::path::Path;
+
+fn cortado(root: &Path, cfg: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("cortado").unwrap();
+    cmd.env("CORTADO_ROOT", root).env("CORTADO_CONFIG_DIR", cfg);
+    cmd
+}
+
+fn git(cwd: &Path, args: &[&str]) {
+    assert!(std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap()
+        .status
+        .success());
+}
+
+#[test]
+fn agent_new_repo_new_scaffolds_everything() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    cortado(root.path(), cfg.path())
+        .args(["team", "new", "Newsletter"])
+        .assert()
+        .success();
+    cortado(root.path(), cfg.path())
+        .args([
+            "agent",
+            "new",
+            "newsletter/Scout",
+            "--role",
+            "Researches topics",
+            "--repo-new",
+        ])
+        .assert()
+        .success();
+    let agent = root.path().join("teams/newsletter/agents/scout");
+    assert!(agent.join("agent.toml").exists());
+    assert!(agent.join("memory/AGENT.md").exists());
+    assert!(agent.join("memory/MEMORY.md").exists());
+    assert!(agent.join("worktree/.git").exists());
+    assert!(agent.join("logs").is_dir());
+    let toml = std::fs::read_to_string(agent.join("agent.toml")).unwrap();
+    assert!(toml.contains("source = \"new\""));
+    assert!(toml.contains("branch = \"agent/scout\""));
+
+    cortado(root.path(), cfg.path())
+        .args(["agent", "ls"])
+        .assert()
+        .success()
+        .stdout(contains("newsletter/scout"));
+}
+
+#[test]
+fn agent_new_worktree_attaches_to_existing_repo() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), &["init", "-b", "main"]);
+    git(project.path(), &["config", "user.email", "t@example.com"]);
+    git(project.path(), &["config", "user.name", "t"]);
+    std::fs::write(project.path().join("README.md"), "x").unwrap();
+    git(project.path(), &["add", "-A"]);
+    git(project.path(), &["commit", "-m", "seed"]);
+
+    cortado(root.path(), cfg.path())
+        .args(["team", "new", "Web"])
+        .assert()
+        .success();
+    cortado(root.path(), cfg.path())
+        .args([
+            "agent",
+            "new",
+            "web/Fixer",
+            "--repo-worktree",
+            project.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let wt = root.path().join("teams/web/agents/fixer/worktree");
+    assert!(wt.join("README.md").exists());
+
+    // rm detaches the worktree from the project repo
+    cortado(root.path(), cfg.path())
+        .args(["agent", "rm", "web/fixer", "--yes"])
+        .assert()
+        .success();
+    assert!(!wt.exists());
+}
+
+#[test]
+fn agent_new_requires_team_and_repo_flag() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    cortado(root.path(), cfg.path())
+        .args(["agent", "new", "ghost/Scout", "--repo-new"])
+        .assert()
+        .failure()
+        .stderr(contains("team"));
+}
+
+#[test]
+fn agent_new_codex_runtime_gets_matching_default_model() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    cortado(root.path(), cfg.path())
+        .args(["team", "new", "Mixed"])
+        .assert()
+        .success();
+    cortado(root.path(), cfg.path())
+        .args([
+            "agent",
+            "new",
+            "mixed/Coder",
+            "--runtime",
+            "codex",
+            "--repo-new",
+        ])
+        .assert()
+        .success();
+    let toml =
+        std::fs::read_to_string(root.path().join("teams/mixed/agents/coder/agent.toml")).unwrap();
+    assert!(toml.contains("runtime = \"codex\""));
+    assert!(toml.contains("default_model = \"gpt\""));
+}
+
+#[test]
+fn agent_rm_cleans_exclude_block_after_last_worktree_agent() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), &["init", "-b", "main"]);
+    git(project.path(), &["config", "user.email", "t@example.com"]);
+    git(project.path(), &["config", "user.name", "t"]);
+    std::fs::write(project.path().join("README.md"), "x").unwrap();
+    git(project.path(), &["add", "-A"]);
+    git(project.path(), &["commit", "-m", "seed"]);
+    // A user pattern that must survive everything cortado does.
+    let exclude = project.path().join(".git/info/exclude");
+    std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+    std::fs::write(&exclude, "user-pattern\n").unwrap();
+
+    cortado(root.path(), cfg.path())
+        .args(["team", "new", "Web"])
+        .assert()
+        .success();
+    for name in ["web/A", "web/B"] {
+        cortado(root.path(), cfg.path())
+            .args([
+                "agent",
+                "new",
+                name,
+                "--repo-worktree",
+                project.path().to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+    }
+    // Simulate what `open` does: write the block for this repo.
+    let wt_a = root.path().join("teams/web/agents/a/worktree");
+    cortado_git::exclude(&wt_a, &["CLAUDE.md", ".claude/settings.json"]).unwrap();
+    assert!(std::fs::read_to_string(&exclude)
+        .unwrap()
+        .contains("# cortado begin"));
+
+    // First rm: agent B still references the repo — block stays.
+    cortado(root.path(), cfg.path())
+        .args(["agent", "rm", "web/a", "--yes"])
+        .assert()
+        .success();
+    assert!(std::fs::read_to_string(&exclude)
+        .unwrap()
+        .contains("# cortado begin"));
+
+    // Last rm: block goes, user pattern survives.
+    cortado(root.path(), cfg.path())
+        .args(["agent", "rm", "web/b", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(&exclude).unwrap(), "user-pattern\n");
+}
+
+#[test]
+fn agent_rm_skips_exclude_cleanup_when_survivor_toml_is_corrupt() {
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    git(project.path(), &["init", "-b", "main"]);
+    git(project.path(), &["config", "user.email", "t@example.com"]);
+    git(project.path(), &["config", "user.name", "t"]);
+    std::fs::write(project.path().join("README.md"), "x").unwrap();
+    git(project.path(), &["add", "-A"]);
+    git(project.path(), &["commit", "-m", "seed"]);
+    let exclude = project.path().join(".git/info/exclude");
+
+    cortado(root.path(), cfg.path())
+        .args(["team", "new", "Web"])
+        .assert()
+        .success();
+    for name in ["web/A", "web/B"] {
+        cortado(root.path(), cfg.path())
+            .args([
+                "agent",
+                "new",
+                name,
+                "--repo-worktree",
+                project.path().to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+    }
+    let wt_a = root.path().join("teams/web/agents/a/worktree");
+    cortado_git::exclude(&wt_a, &["CLAUDE.md"]).unwrap();
+    // Corrupt the SURVIVOR's agent.toml, then remove the other agent.
+    std::fs::write(
+        root.path().join("teams/web/agents/b/agent.toml"),
+        "not [valid",
+    )
+    .unwrap();
+    cortado(root.path(), cfg.path())
+        .args(["agent", "rm", "web/a", "--yes"])
+        .assert()
+        .success();
+    // Fail closed: block must survive because b might still need it.
+    assert!(std::fs::read_to_string(&exclude)
+        .unwrap()
+        .contains("# cortado begin"));
+}

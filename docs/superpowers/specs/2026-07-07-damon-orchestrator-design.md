@@ -6,6 +6,9 @@ plus the **As-built addendum** at the end, which records every divergence
 between this spec and the shipped code. Read the addendum before planning M3 —
 where it conflicts with the body, the addendum (i.e. the code) wins.
 
+> **Renamed:** the project was renamed `damon` → **Cortado** in M8 (2026-07-10).
+> Identifiers throughout this historical document reflect the pre-rename name.
+
 ## What
 
 Damon is a Rust orchestrator for persistent coding agents, in the spirit of
