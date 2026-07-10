@@ -51,12 +51,12 @@ Rules every agent follows:
 ### Runbook (how the human conducts a run)
 
 ```
-cortado open content-creator/Orchestrator   # give it the topic; it writes 00-brief.md
-cortado open content-creator/Researcher      # it reads 00, writes 10-research.md
-cortado open content-creator/Writer          # it reads 00+10, writes 20-draft.md
-cortado open content-creator/QA              # it reads 00+10+20, writes 30-qa.md
+cortado open content-creator/orchestrator   # give it the topic; it writes 00-brief.md
+cortado open content-creator/researcher      # it reads 00, writes 10-research.md
+cortado open content-creator/writer          # it reads 00+10, writes 20-draft.md
+cortado open content-creator/qa              # it reads 00+10+20, writes 30-qa.md
 # if QA = REVISE: reopen Writer, then QA again (max 2 loops)
-cortado open content-creator/Orchestrator    # it reads 30-qa.md (PASS), writes 40-final.md
+cortado open content-creator/orchestrator    # it reads 30-qa.md (PASS), writes 40-final.md
 ```
 
 ---

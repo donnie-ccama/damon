@@ -45,12 +45,12 @@ case or its capabilities.
 ## Runbook (guide the human through this order)
 
 ```
-cortado open content-creator/Orchestrator   # give it the topic; it writes 00-brief.md
-cortado open content-creator/Researcher      # reads 00, writes 10-research.md
-cortado open content-creator/Writer          # reads 00+10, writes 20-draft.md
-cortado open content-creator/QA              # reads 00+10+20, writes 30-qa.md
+cortado open content-creator/orchestrator   # give it the topic; it writes 00-brief.md
+cortado open content-creator/researcher      # reads 00, writes 10-research.md
+cortado open content-creator/writer          # reads 00+10, writes 20-draft.md
+cortado open content-creator/qa              # reads 00+10+20, writes 30-qa.md
 # if QA = REVISE: reopen Writer, then QA again (max 2 loops)
-cortado open content-creator/Orchestrator    # reads 30-qa.md (PASS), writes 40-final.md
+cortado open content-creator/orchestrator    # reads 30-qa.md (PASS), writes 40-final.md
 ```
 
 ## Publishing rule
