@@ -1,0 +1,9 @@
+[agent]
+name = "Writer"
+role = "Drafts Streetlight essays in Donnie's voice, persona rules verbatim"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/writer"
