@@ -490,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn rail_selection_renders_reversed() {
+    fn rail_selection_uses_theme_background() {
         let m = Model {
             sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
             ..Default::default()
@@ -563,6 +563,24 @@ mod tests {
             .unwrap();
         assert!(any_cell_matches(terminal.backend(), |c| {
             c.bg == crate::tui::theme::SELECTION_BG
+        }));
+    }
+
+    #[test]
+    fn selected_team_keeps_blue_fg() {
+        // A selected TEAM row keeps its blue team fg — semantic color wins
+        // over the magenta selection fg, the same way a selected INVALID row
+        // stays red. The selection bg still marks the row.
+        let m = Model {
+            sel: Some(RailSel::Team(s("newsletter"))),
+            ..Default::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        terminal
+            .draw(|f| render(f, &m, &snap(), 1000 + 3723))
+            .unwrap();
+        assert!(any_cell_matches(terminal.backend(), |c| {
+            c.fg == crate::tui::theme::BORDER_FG && c.bg == crate::tui::theme::SELECTION_BG
         }));
     }
 

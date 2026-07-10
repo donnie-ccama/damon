@@ -101,13 +101,19 @@ pub fn error_block() -> Style   { Style::default().fg(RED) }
 ### Selection preserves semantic color
 
 `selection()` sets the row's **base** style (bg + magenta fg + bold).
-Each row's own styled spans — the green badge, a red INVALID — keep
-their fg because in ratatui a span's style patches over the list/base
-style for that span's cells. So a selected live agent still shows a
-green badge on the magenta bar, and a selected INVALID stays red; the
-highlight never clobbers a semantic color. The `selected()` helper in
-`view.rs` changes from applying `Modifier::REVERSED` to applying
-`theme::selection()`.
+Each row's own styled spans — the green badge, a red INVALID, and a
+blue team name — keep their fg because in ratatui a span's style
+patches over the list/base style for that span's cells. So a selected
+live agent still shows a green badge on the magenta bar, a selected
+INVALID stays red, and a selected team row stays blue (from
+`theme::team()`); the highlight never clobbers a semantic color. The
+magenta selection fg therefore only shows through on text that has no
+color of its own (e.g. agent names), while the selection background
+still marks every selected row regardless of its fg. This is a
+deliberate decision, confirmed in review: a selected team stays
+recognizably blue, the same way a selected INVALID row stays red. The
+`selected()` helper in `view.rs` changes from applying
+`Modifier::REVERSED` to applying `theme::selection()`.
 
 ### Status line: error special-case
 
