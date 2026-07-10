@@ -4,6 +4,7 @@ pub mod app;
 pub mod event;
 pub mod popup;
 pub mod snapshot;
+pub mod theme;
 pub mod view;
 
 use app::{Action, Event, Model, Preview};

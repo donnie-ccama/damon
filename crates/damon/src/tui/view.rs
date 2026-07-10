@@ -2,10 +2,12 @@
 use crate::tui::app::{Model, RailSel, Tab};
 use crate::tui::popup::{FormFocus, NewAgentForm, Popup, RepoChoice};
 use crate::tui::snapshot::{AgentRow, Snapshot};
+use crate::tui::theme;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
+};
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, m: &Model, snap: &Snapshot, now_unix: i64) {
@@ -27,7 +29,8 @@ pub fn render_error(f: &mut Frame, msg: &str) {
         Paragraph::new(text).wrap(Wrap { trim: false }).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("damon — error"),
+                .border_style(theme::error_block())
+                .title(Line::styled("damon — error", theme::error_block())),
         ),
         f.area(),
     );
@@ -38,11 +41,8 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
     for t in &snap.teams {
         let sel = m.sel == Some(RailSel::Team(t.slug.clone()));
         let line = match &t.display {
-            Ok(name) => Line::styled(name.clone(), Style::default().add_modifier(Modifier::BOLD)),
-            Err(_) => Line::styled(
-                format!("{} INVALID", t.slug),
-                Style::default().fg(Color::Red),
-            ),
+            Ok(name) => Line::styled(name.clone(), theme::team()),
+            Err(_) => Line::styled(format!("{} INVALID", t.slug), theme::invalid()),
         };
         items.push(selected(ListItem::new(line), sel));
         for a in &t.agents {
@@ -53,15 +53,12 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
                     if !a.sessions.is_empty() {
                         spans.push(Span::styled(
                             format!(" ●{}", a.sessions.len()),
-                            Style::default().fg(Color::Green),
+                            theme::badge(),
                         ));
                     }
                     Line::from(spans)
                 }
-                Err(_) => Line::styled(
-                    format!("  {} INVALID", a.slug),
-                    Style::default().fg(Color::Red),
-                ),
+                Err(_) => Line::styled(format!("  {} INVALID", a.slug), theme::invalid()),
             };
             items.push(selected(ListItem::new(line), sel));
         }
@@ -69,18 +66,23 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
     for s in &snap.strays {
         items.push(ListItem::new(Line::styled(
             format!("{}: INVALID NAME {:?}", s.context, s.name),
-            Style::default().fg(Color::Red),
+            theme::invalid(),
         )));
     }
     f.render_widget(
-        List::new(items).block(Block::default().borders(Borders::ALL).title("agents")),
+        List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme::border())
+                .title(Line::styled("agents", theme::title())),
+        ),
         area,
     );
 }
 
 fn selected(item: ListItem<'_>, on: bool) -> ListItem<'_> {
     if on {
-        item.style(Style::default().add_modifier(Modifier::REVERSED))
+        item.style(theme::selection())
     } else {
         item
     }
@@ -95,7 +97,8 @@ fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot, now_unix:
     f.render_widget(
         Tabs::new(vec!["Sessions", "Memory"])
             .select(idx)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)),
+            .style(theme::tab_inactive())
+            .highlight_style(theme::tab_active()),
         bar,
     );
     let agent = m.selected_agent(snap);
@@ -106,7 +109,10 @@ fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot, now_unix:
 }
 
 fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix: i64) {
-    let block = Block::default().borders(Borders::ALL).title("sessions");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border())
+        .title(Line::styled("sessions", theme::title()));
     let Some(agent) = agent else {
         f.render_widget(Paragraph::new("select an agent").block(block), area);
         return;
@@ -123,9 +129,12 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
         .iter()
         .map(|s| {
             Row::new(vec![
-                s.name.clone(),
-                s.model.clone(),
-                fmt_uptime(now_unix - s.created_unix),
+                Cell::from(s.name.clone()),
+                Cell::from(Span::styled(s.model.clone(), theme::model_col())),
+                Cell::from(Span::styled(
+                    fmt_uptime(now_unix - s.created_unix),
+                    theme::uptime_col(),
+                )),
             ])
         })
         .collect();
@@ -138,10 +147,7 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
                 Constraint::Length(8),
             ],
         )
-        .header(
-            Row::new(vec!["session", "model", "uptime"])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
+        .header(Row::new(vec!["session", "model", "uptime"]).style(theme::header()))
         .block(block),
         area,
     );
@@ -170,13 +176,20 @@ fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(format!("{} — j/k scroll, Esc back", p.title)),
+                        .border_style(theme::border())
+                        .title(Line::styled(
+                            format!("{} — j/k scroll, Esc back", p.title),
+                            theme::title(),
+                        )),
                 ),
             area,
         );
         return;
     }
-    let block = Block::default().borders(Borders::ALL).title("memory");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border())
+        .title(Line::styled("memory", theme::title()));
     let Some(agent) = agent else {
         f.render_widget(Paragraph::new("select an agent").block(block), area);
         return;
@@ -191,11 +204,16 @@ fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>)
 }
 
 fn render_status(f: &mut Frame, area: Rect, m: &Model) {
-    let text = m.status.clone().unwrap_or_else(|| {
-        "n new session · Enter open · e edit · x kill · N new agent · Tab/m tabs · q quit"
-            .to_string()
-    });
-    f.render_widget(Paragraph::new(text), area);
+    let (text, style) = match &m.status {
+        Some(s) if s.starts_with("error") => (s.clone(), theme::status_error()),
+        Some(s) => (s.clone(), theme::status_msg()),
+        None => (
+            "n new session · Enter open · e edit · x kill · N new agent · Tab/m tabs · q quit"
+                .to_string(),
+            theme::hint(),
+        ),
+    };
+    f.render_widget(Paragraph::new(text).style(style), area);
 }
 
 fn render_popup(f: &mut Frame, popup: &Popup) {
@@ -215,15 +233,23 @@ fn render_popup(f: &mut Frame, popup: &Popup) {
                 List::new(items).block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title("new session — pick model (Enter/Esc)"),
+                        .border_style(theme::border())
+                        .title(Line::styled(
+                            "new session — pick model (Enter/Esc)",
+                            theme::title(),
+                        )),
                 ),
                 area,
             );
         }
         Popup::ConfirmKill { reference, count } => {
             f.render_widget(
-                Paragraph::new(format!("kill {count} session(s) of {reference}?  y / n"))
-                    .block(Block::default().borders(Borders::ALL).title("confirm kill")),
+                Paragraph::new(format!("kill {count} session(s) of {reference}?  y / n")).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(theme::border())
+                        .title(Line::styled("confirm kill", theme::title())),
+                ),
                 area,
             );
         }
@@ -261,7 +287,12 @@ fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
         Line::from("  Tab next · ←/→ cycle · Enter create · Esc cancel"),
     ];
     f.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("new agent")),
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme::border())
+                .title(Line::styled("new agent", theme::title())),
+        ),
         area,
     );
 }
@@ -440,14 +471,17 @@ mod tests {
         terminal
     }
 
-    /// Every buffer cell rendered with the REVERSED modifier, concatenated.
-    fn reversed_text(backend: &TestBackend) -> String {
+    /// Every buffer cell rendered with the theme's selection background,
+    /// concatenated. Post-theme replacement for the old REVERSED-modifier
+    /// check: selection is now marked by `theme::SELECTION_BG`, not a
+    /// modifier.
+    fn selected_bg_text(backend: &TestBackend) -> String {
         let buf = backend.buffer();
         let mut out = String::new();
         for y in 0..buf.area.height {
             for x in 0..buf.area.width {
                 let cell = &buf[(x, y)];
-                if cell.style().add_modifier.contains(Modifier::REVERSED) {
+                if cell.bg == crate::tui::theme::SELECTION_BG {
                     out.push_str(cell.symbol());
                 }
             }
@@ -462,9 +496,9 @@ mod tests {
             ..Default::default()
         };
         let terminal = rendered_terminal(&m, &snap());
-        let rev = reversed_text(terminal.backend());
-        assert!(rev.contains("Scout"), "reversed cells: {rev:?}");
-        assert!(!rev.contains("Newsletter"), "reversed cells: {rev:?}");
+        let rev = selected_bg_text(terminal.backend());
+        assert!(rev.contains("Scout"), "selected-bg cells: {rev:?}");
+        assert!(!rev.contains("Newsletter"), "selected-bg cells: {rev:?}");
     }
 
     #[test]
@@ -487,9 +521,12 @@ mod tests {
         assert!(text.contains("pick model"));
         assert!(text.contains("Claude (claude)"));
         assert!(text.contains("Kimi K2 (kimi)"));
-        let rev = reversed_text(terminal.backend());
-        assert!(rev.contains("Kimi K2 (kimi)"), "reversed cells: {rev:?}");
-        assert!(!rev.contains("Claude (claude)"), "reversed cells: {rev:?}");
+        let rev = selected_bg_text(terminal.backend());
+        assert!(rev.contains("Kimi K2 (kimi)"), "selected-bg cells: {rev:?}");
+        assert!(
+            !rev.contains("Claude (claude)"),
+            "selected-bg cells: {rev:?}"
+        );
     }
 
     #[test]
@@ -504,6 +541,44 @@ mod tests {
         };
         assert_eq!(count(20), 1);
         assert_eq!(count(10), 2);
+    }
+
+    fn any_cell_matches(
+        backend: &TestBackend,
+        pred: impl Fn(&ratatui::buffer::Cell) -> bool,
+    ) -> bool {
+        let buf = backend.buffer();
+        (0..buf.area.height).any(|y| (0..buf.area.width).any(|x| pred(&buf[(x, y)])))
+    }
+
+    #[test]
+    fn selection_bar_uses_theme_background() {
+        let m = Model {
+            sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
+            ..Default::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        terminal
+            .draw(|f| render(f, &m, &snap(), 1000 + 3723))
+            .unwrap();
+        assert!(any_cell_matches(terminal.backend(), |c| {
+            c.bg == crate::tui::theme::SELECTION_BG
+        }));
+    }
+
+    #[test]
+    fn borders_use_theme_color() {
+        let m = Model {
+            sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
+            ..Default::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        terminal
+            .draw(|f| render(f, &m, &snap(), 1000 + 3723))
+            .unwrap();
+        assert!(any_cell_matches(terminal.backend(), |c| {
+            c.fg == crate::tui::theme::BORDER_FG
+        }));
     }
 
     #[test]
