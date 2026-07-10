@@ -1,0 +1,9 @@
+[agent]
+name = "Orchestrator"
+role = "Plans the brief, sequences the pipeline, assembles and publishes the final essay"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/orchestrator"

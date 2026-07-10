@@ -1,0 +1,9 @@
+[agent]
+name = "Researcher"
+role = "Truth-and-texture research for Streetlight essays (no stats/citations)"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/researcher"

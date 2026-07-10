@@ -1,0 +1,9 @@
+[agent]
+name = "QA"
+role = "Runs the Streetlight quality gate; PASS or revision notes"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/qa"
