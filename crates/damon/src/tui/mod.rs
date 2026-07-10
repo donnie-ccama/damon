@@ -49,10 +49,20 @@ fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow
                 for action in app::update(&mut model, snap, ev) {
                     match action {
                         Action::Edit { path } => {
-                            let status = match suspend(&mut terminal, || {
+                            let result = suspend(&mut terminal, || {
                                 crate::commands::memory::spawn_editor(&path)
-                            }) {
-                                Ok(Ok(s)) if s.success() => format!("edited {}", path.display()),
+                            });
+                            let status = match result {
+                                Ok(Ok(s)) if s.success() => {
+                                    // File may have changed; refresh the open
+                                    // preview if it's this file.
+                                    match app::refresh_preview(&mut model, &path) {
+                                        Ok(()) => format!("edited {}", path.display()),
+                                        Err(e) => {
+                                            format!("edited {} (preview: {e})", path.display())
+                                        }
+                                    }
+                                }
                                 Ok(Ok(s)) => format!("editor exited {}", s.code().unwrap_or(-1)),
                                 Ok(Err(e)) => format!("error: {e:#}"),
                                 Err(e) => format!("error: {e}"),
