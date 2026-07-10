@@ -107,16 +107,29 @@ fn load_world(config: &Config) -> Result<Snapshot, String> {
 }
 
 /// Leave the alternate screen + raw mode, run `f` (e.g. an editor) against the
-/// real terminal, then restore the TUI and force a full redraw.
+/// real terminal, then restore the TUI and force a full redraw. Every error
+/// path leaves the terminal in the TUI-expected state (raw on + alt screen),
+/// because the event loop keeps drawing after this returns.
 fn suspend<T>(
     terminal: &mut ratatui::DefaultTerminal,
     f: impl FnOnce() -> T,
 ) -> std::io::Result<T> {
+    // Leave TUI mode for the child process.
     disable_raw_mode()?;
-    execute!(stdout(), LeaveAlternateScreen)?;
+    if let Err(e) = execute!(stdout(), LeaveAlternateScreen) {
+        // Raw mode is already off; restore it so we don't return with the
+        // terminal in a mixed (raw-off, still-alt-screen) state.
+        let _ = enable_raw_mode();
+        return Err(e);
+    }
+
     let out = f();
-    execute!(stdout(), EnterAlternateScreen)?;
-    enable_raw_mode()?;
+
+    // Restore TUI mode. Attempt both steps even if the first fails, and
+    // report the first error rather than short-circuiting mid-restore.
+    let enter = execute!(stdout(), EnterAlternateScreen);
+    let raw = enable_raw_mode();
+    enter.and(raw)?;
     terminal.clear()?;
     Ok(out)
 }
