@@ -6,6 +6,7 @@ use crate::tui::snapshot::{AgentRow, Snapshot};
 use damon_core::entity::RuntimeId;
 use damon_core::slug::Slug;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use std::cell::Cell;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -59,6 +60,10 @@ pub struct Preview {
     pub content: String,
     pub scroll: u16,
     pub path: PathBuf,
+    /// Max scroll offset (total wrapped rows minus visible rows),
+    /// recomputed each frame by `render_memory`. Interior-mutable so the
+    /// immutable render pass can update it; `update_preview` clamps to it.
+    pub max_scroll: Cell<u16>,
 }
 
 #[derive(Default)]
@@ -238,7 +243,7 @@ fn update_preview(m: &mut Model, key: KeyEvent) -> Vec<Action> {
     let Some(p) = m.preview.as_mut() else {
         return Vec::new();
     };
-    let max = p.content.lines().count().saturating_sub(1) as u16;
+    let max = p.max_scroll.get();
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => m.preview = None,
         KeyCode::Up | KeyCode::Char('k') => p.scroll = p.scroll.saturating_sub(1),
@@ -389,6 +394,7 @@ mod tests {
                 content: "a\nb".into(),
                 scroll: 0,
                 path: "/mem/AGENT.md".into(),
+                max_scroll: std::cell::Cell::new(1),
             }),
             ..Default::default()
         };
@@ -399,14 +405,15 @@ mod tests {
     }
 
     #[test]
-    fn preview_scroll_is_bounded_by_content() {
+    fn preview_scroll_is_bounded_by_max_scroll() {
         let snap = snap_fixture();
         let mut m = Model {
             preview: Some(Preview {
                 title: "t".into(),
-                content: "a\nb\nc".into(), // 3 lines -> max scroll 2
+                content: "a\nb\nc".into(),
                 scroll: 0,
                 path: "/mem/AGENT.md".into(),
+                max_scroll: std::cell::Cell::new(2), // normally set by render
             }),
             ..Default::default()
         };
@@ -416,6 +423,11 @@ mod tests {
         assert_eq!(m.preview.as_ref().unwrap().scroll, 2);
         update(&mut m, &snap, key(KeyCode::PageDown));
         assert_eq!(m.preview.as_ref().unwrap().scroll, 2);
+        // Up/PageUp floor at 0.
+        for _ in 0..10 {
+            update(&mut m, &snap, key(KeyCode::Char('k')));
+        }
+        assert_eq!(m.preview.as_ref().unwrap().scroll, 0);
     }
 
     #[test]
@@ -442,6 +454,7 @@ mod tests {
                 content: "hi".into(),
                 scroll: 0,
                 path: "/mem/AGENT.md".into(),
+                max_scroll: std::cell::Cell::new(0),
             }),
             ..Default::default()
         };

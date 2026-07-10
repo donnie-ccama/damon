@@ -149,6 +149,20 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
 
 fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>) {
     if let Some(p) = &m.preview {
+        // Wrap-accurate max scroll: total wrapped rows minus the visible
+        // inner height. line_count wraps at exactly the width passed (it does
+        // NOT subtract block borders) and would add border rows, so measure a
+        // blockless paragraph at the inner width and do the border math here.
+        let inner_w = area.width.saturating_sub(2);
+        let inner_h = area.height.saturating_sub(2);
+        let total_rows = u16::try_from(
+            Paragraph::new(p.content.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(inner_w),
+        )
+        .unwrap_or(u16::MAX);
+        p.max_scroll.set(total_rows.saturating_sub(inner_h));
+
         f.render_widget(
             Paragraph::new(p.content.clone())
                 .scroll((p.scroll, 0))
@@ -367,6 +381,7 @@ mod tests {
             content: "hello memory".into(),
             scroll: 0,
             path: "/mem/AGENT.md".into(),
+            max_scroll: std::cell::Cell::new(0),
         });
         let text = rendered(&m, &snap());
         assert!(text.contains("hello memory"));
@@ -475,6 +490,20 @@ mod tests {
         let rev = reversed_text(terminal.backend());
         assert!(rev.contains("Kimi K2 (kimi)"), "reversed cells: {rev:?}");
         assert!(!rev.contains("Claude (claude)"), "reversed cells: {rev:?}");
+    }
+
+    #[test]
+    fn ratatui_line_count_wraps_as_expected() {
+        // Pins the line_count semantics the preview scroll clamp relies on;
+        // a ratatui upgrade that changes wrapping fails here, not silently.
+        let text = "Hello World";
+        let count = |w| {
+            Paragraph::new(text)
+                .wrap(Wrap { trim: false })
+                .line_count(w)
+        };
+        assert_eq!(count(20), 1);
+        assert_eq!(count(10), 2);
     }
 
     #[test]

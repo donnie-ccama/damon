@@ -160,6 +160,7 @@ fn execute_action(action: Action, m: &mut Model) -> bool {
                     content,
                     scroll: 0,
                     path,
+                    max_scroll: std::cell::Cell::new(0),
                 })
             }
             Err(e) => m.status = Some(format!("error: {}: {e}", path.display())),
