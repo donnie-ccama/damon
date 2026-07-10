@@ -153,11 +153,14 @@ Behavior on re-read failure: **keep the stale pane open** and surface
 the error in `m.status` (consistent with the existing `Action::Preview`
 error handling). Do not auto-close the pane. (Confirmed in scoping.)
 
-On success, clamp `preview.scroll` against the current `max_scroll`
-Cell value. That value may be one frame stale relative to the new
-content, but the next render recomputes it and the subsequent key
-re-clamps, so scroll can never be left visibly out of range for more
-than the moment before the next draw.
+On success, leave `preview.scroll` untouched — the current `max_scroll`
+Cell value is stale relative to the new content, so clamping against it
+would be a no-op (or worse, wrong) rather than a real bound. Scroll
+position is preserved across the refresh and re-clamped on the next
+scroll key, once the next render has recomputed `max_scroll` for the
+new content — the same family as the pre-existing resize-taller
+behavior. A shrink-while-scrolled edit can therefore briefly show an
+under-filled or blank pane that self-corrects on the next scroll key.
 
 The event loop's `Action::Edit` arm calls `refresh_preview` after a
 successful edit and folds any returned error into the status it already
@@ -252,5 +255,8 @@ pty smoke test for the editor suspend path is re-run once by hand.
 
 - **ratatui `line_count` is unstable API.** Mitigated by the pinned
   `0.29` + committed lock file and the wrap guard test in item 4.
-- **One-frame lag on `max_scroll`.** Analyzed above; bounded to a single
-  pre-draw moment and never produces a visibly wrong frame.
+- **Post-edit scroll on a shrunk file.** Scroll position is preserved
+  (not clamped) across `refresh_preview`, so a shrink-while-scrolled
+  edit can briefly show an under-filled or blank pane until the next
+  scroll key re-clamps it against the freshly computed `max_scroll` —
+  the same family as the pre-existing resize-taller behavior.

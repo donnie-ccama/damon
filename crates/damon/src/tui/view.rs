@@ -153,7 +153,7 @@ fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>)
         // inner height. line_count wraps at exactly the width passed (it does
         // NOT subtract block borders) and would add border rows, so measure a
         // blockless paragraph at the inner width and do the border math here.
-        let inner_w = area.width.saturating_sub(2);
+        let inner_w = area.width.saturating_sub(2).max(1);
         let inner_h = area.height.saturating_sub(2);
         let total_rows = u16::try_from(
             Paragraph::new(p.content.clone())

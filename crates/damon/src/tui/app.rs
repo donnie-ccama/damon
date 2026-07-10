@@ -263,7 +263,10 @@ fn update_preview(m: &mut Model, key: KeyEvent) -> Vec<Action> {
 /// Re-read `path` into the open preview when it is the file being shown
 /// (e.g. after an in-place edit). Keeps the pane open on read failure and
 /// returns an error string for the status line. `Ok(())` no-op when no
-/// preview is open or a different file is shown.
+/// preview is open or a different file is shown. The scroll position is
+/// preserved across the refresh and re-clamped against the freshly
+/// computed `max_scroll` on the next scroll key — the same way scroll is
+/// already handled after a terminal resize.
 pub fn refresh_preview(m: &mut Model, path: &Path) -> Result<(), String> {
     let Some(p) = m.preview.as_mut() else {
         return Ok(());
@@ -274,7 +277,6 @@ pub fn refresh_preview(m: &mut Model, path: &Path) -> Result<(), String> {
     match std::fs::read_to_string(path) {
         Ok(content) => {
             p.content = content;
-            p.scroll = p.scroll.min(p.max_scroll.get());
             Ok(())
         }
         Err(e) => Err(format!("{}: {e}", path.display())),
@@ -683,6 +685,27 @@ mod tests {
         std::fs::write(&path, "after edit").unwrap();
         assert!(refresh_preview(&mut m, &path).is_ok());
         assert_eq!(m.preview.as_ref().unwrap().content, "after edit");
+    }
+
+    #[test]
+    fn refresh_preview_preserves_scroll_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENT.md");
+        std::fs::write(&path, "before").unwrap();
+        let mut m = Model {
+            preview: Some(Preview {
+                title: "AGENT.md".into(),
+                content: "before".into(),
+                scroll: 5,
+                path: path.clone(),
+                max_scroll: std::cell::Cell::new(5),
+            }),
+            ..Default::default()
+        };
+        std::fs::write(&path, "after edit").unwrap();
+        assert!(refresh_preview(&mut m, &path).is_ok());
+        assert_eq!(m.preview.as_ref().unwrap().content, "after edit");
+        assert_eq!(m.preview.as_ref().unwrap().scroll, 5);
     }
 
     #[test]
