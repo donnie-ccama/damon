@@ -44,14 +44,19 @@ pub struct PaneInfo {
     pub id: String,
     /// The `@cortado_session` pane option, if tagged.
     pub session_tag: Option<String>,
+    pub width: u16,
 }
 
-/// Parse one `#{pane_id}|#{@cortado_session}` line.
+/// Parse one `#{pane_id}|#{@cortado_session}|#{pane_width}` line.
 fn parse_pane_line(line: &str) -> Option<PaneInfo> {
-    let (id, tag) = line.split_once('|')?;
+    let mut parts = line.split('|');
+    let id = parts.next()?.to_string();
+    let tag = parts.next()?;
+    let width = parts.next()?.parse().ok()?;
     Some(PaneInfo {
-        id: id.to_string(),
+        id,
         session_tag: (!tag.is_empty()).then(|| tag.to_string()),
+        width,
     })
 }
 
@@ -204,23 +209,27 @@ impl Tmux {
         Ok(())
     }
 
-    /// `split-window -t <target> [-e K=V]... -P -F #{pane_id} -- command...`
+    /// `split-window [-h] -t <target> [-e K=V]... -P -F #{pane_id} -- command...`
     /// Returns the new pane's id (`%N`). Env via `-e` (tmux >= 3.2), same
     /// secrecy rationale as `spawn`.
     pub fn split_window(
         &self,
         target: &str,
+        horizontal: bool,
         env: &BTreeMap<String, String>,
         command: &[String],
     ) -> Result<String, TmuxError> {
-        let mut args: Vec<String> = vec![
-            "split-window".into(),
+        let mut args: Vec<String> = vec!["split-window".into()];
+        if horizontal {
+            args.push("-h".into());
+        }
+        args.extend([
             "-t".into(),
             target.into(),
             "-P".into(),
             "-F".into(),
             "#{pane_id}".into(),
-        ];
+        ]);
         for (k, v) in env {
             args.push("-e".into());
             args.push(format!("{k}={v}"));
@@ -248,7 +257,8 @@ impl Tmux {
         Ok(())
     }
 
-    /// All panes of a session (all windows), with the `@cortado_session` tag.
+    /// All panes of a session (all windows), with the `@cortado_session` tag,
+    /// in layout (index) order.
     pub fn list_panes(&self, session: &str) -> Result<Vec<PaneInfo>, TmuxError> {
         let out = self.run(&[
             "list-panes".into(),
@@ -256,9 +266,47 @@ impl Tmux {
             "-t".into(),
             session.into(),
             "-F".into(),
-            "#{pane_id}|#{@cortado_session}".into(),
+            "#{pane_id}|#{@cortado_session}|#{pane_width}".into(),
         ])?;
         Ok(out.lines().filter_map(parse_pane_line).collect())
+    }
+
+    /// The window's total width in columns.
+    pub fn window_width(&self, target: &str) -> Result<u16, TmuxError> {
+        let out = self.run(&[
+            "display-message".into(),
+            "-p".into(),
+            "-t".into(),
+            target.into(),
+            "#{window_width}".into(),
+        ])?;
+        out.trim()
+            .parse()
+            .map_err(|_| TmuxError::Version(format!("window_width: {out:?}")))
+    }
+
+    /// Resize a pane to an absolute width in columns.
+    pub fn resize_pane_width(&self, pane: &str, width: u16) -> Result<(), TmuxError> {
+        self.run(&[
+            "resize-pane".into(),
+            "-t".into(),
+            pane.into(),
+            "-x".into(),
+            width.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    /// Bind a prefix-table key on this server (`-r` = repeatable).
+    pub fn bind_key(&self, repeatable: bool, key: &str, command: &[&str]) -> Result<(), TmuxError> {
+        let mut args: Vec<String> = vec!["bind-key".into()];
+        if repeatable {
+            args.push("-r".into());
+        }
+        args.push(key.into());
+        args.extend(command.iter().map(|s| s.to_string()));
+        self.run(&args)?;
+        Ok(())
     }
 
     pub fn select_layout(&self, target: &str, layout: &str) -> Result<(), TmuxError> {
@@ -335,21 +383,24 @@ mod tests {
     #[test]
     fn parses_pane_lines_with_optional_session_tag() {
         assert_eq!(
-            parse_pane_line("%3|cortado_newsletter_scout_1"),
+            parse_pane_line("%3|cortado_newsletter_scout_1|53"),
             Some(PaneInfo {
                 id: "%3".into(),
                 session_tag: Some("cortado_newsletter_scout_1".into()),
+                width: 53,
             })
         );
-        // Untagged pane (e.g. the rail) renders an empty trailing field.
+        // Untagged pane (e.g. the rail) renders an empty middle field.
         assert_eq!(
-            parse_pane_line("%0|"),
+            parse_pane_line("%0||34"),
             Some(PaneInfo {
                 id: "%0".into(),
-                session_tag: None
+                session_tag: None,
+                width: 34,
             })
         );
         assert_eq!(parse_pane_line("no-separator"), None);
+        assert_eq!(parse_pane_line("%1|tag|not-a-number"), None);
     }
 
     #[test]

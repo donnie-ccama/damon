@@ -193,6 +193,20 @@ keep running, exactly as before. `cortado open` from any shell lands the
 agent in the workspace, starting it if needed. The old
 one-window-per-agent behavior remains: set `launcher = "ghostty"`.
 
+Every new agent pane takes an **equal share** of the width right of the
+rail — a second agent halves that space, a third splits it three ways —
+and the rail stays pinned at 34 columns. To resize panes yourself:
+
+| Control | Action |
+|---|---|
+| mouse drag on a pane border | resize freely |
+| `C-b H` / `C-b L` | pane 5 columns narrower / wider (repeatable: keep tapping `H`/`L` after one `C-b`) |
+| `C-b J` / `C-b K` | pane 3 rows taller / shorter |
+
+The reminder lives in the workspace status bar: *drag borders · C-b H/L
+resize*. Cortado re-balances widths only when it adds a pane; your manual
+sizes are otherwise left alone.
+
 ## Configuration
 
 `~/.config/cortado/config.toml` (all keys optional — these are the defaults):
