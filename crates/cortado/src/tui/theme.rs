@@ -4,6 +4,8 @@ use ratatui::style::{Color, Modifier, Style};
 
 const BG_HIGHLIGHT: Color = Color::Rgb(0x29, 0x2e, 0x42);
 const MUTED: Color = Color::Rgb(0x56, 0x5f, 0x89);
+/// MUTED at ~3x perceptual luminance: the bottom key menu must stay readable.
+const HINT: Color = Color::Rgb(0x8e, 0x9d, 0xe2);
 const BLUE: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
 const CYAN: Color = Color::Rgb(0x7d, 0xcf, 0xff);
 const GREEN: Color = Color::Rgb(0x9e, 0xce, 0x6a);
@@ -54,7 +56,7 @@ pub fn invalid() -> Style {
     Style::default().fg(RED)
 }
 pub fn hint() -> Style {
-    Style::default().fg(MUTED)
+    Style::default().fg(HINT)
 }
 pub fn status_msg() -> Style {
     Style::default().fg(ORANGE)
