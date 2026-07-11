@@ -36,6 +36,20 @@ fn workspace_viewer_lifecycle() {
     let panes = t.list_panes(workspace::WORKSPACE_SESSION).unwrap();
     assert_eq!(panes.len(), 2, "rail + one viewer, got {panes:?}");
 
+    // A second agent halves the space right of the rail: rail stays at
+    // RAIL_WIDTH and the two viewers get equal widths.
+    t.spawn("cortado_t_b_1", tmp.path(), &BTreeMap::new(), &sleep_cmd())
+        .unwrap();
+    workspace::open_viewer(&t, "cortado_t_b_1", "t/b").unwrap();
+    let panes = t.list_panes(workspace::WORKSPACE_SESSION).unwrap();
+    assert_eq!(panes.len(), 3, "rail + two viewers, got {panes:?}");
+    assert_eq!(panes[0].width, workspace::RAIL_WIDTH, "rail pinned");
+    let (v1, v2) = (panes[1].width, panes[2].width);
+    assert!(
+        v1.abs_diff(v2) <= 1,
+        "viewers must share equally, got {v1} vs {v2}"
+    );
+
     // Killing the workspace never touches the agent session.
     t.kill(workspace::WORKSPACE_SESSION).unwrap();
     assert!(t.has("cortado_t_a_1").unwrap());

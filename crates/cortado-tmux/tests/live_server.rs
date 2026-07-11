@@ -86,6 +86,7 @@ fn pane_lifecycle_split_tag_list_layout() {
     let pane = t
         .split_window(
             "cortado_workspace:0",
+            true,
             &split_env,
             &["sleep".to_string(), "30".to_string()],
         )
