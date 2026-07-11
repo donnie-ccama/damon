@@ -39,6 +39,22 @@ pub struct SessionInfo {
     pub model: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneInfo {
+    pub id: String,
+    /// The `@cortado_session` pane option, if tagged.
+    pub session_tag: Option<String>,
+}
+
+/// Parse one `#{pane_id}|#{@cortado_session}` line.
+fn parse_pane_line(line: &str) -> Option<PaneInfo> {
+    let (id, tag) = line.split_once('|')?;
+    Some(PaneInfo {
+        id: id.to_string(),
+        session_tag: (!tag.is_empty()).then(|| tag.to_string()),
+    })
+}
+
 pub struct Tmux {
     socket: String,
 }
@@ -157,6 +173,127 @@ impl Tmux {
         ])?;
         Ok(())
     }
+
+    /// Set several session options in one call (used at spawn/workspace-create).
+    pub fn set_session_options(
+        &self,
+        session: &str,
+        opts: &[(&str, &str)],
+    ) -> Result<(), TmuxError> {
+        for (k, v) in opts {
+            self.set_option(session, k, v)?;
+        }
+        Ok(())
+    }
+
+    /// Window-scoped option (e.g. `main-pane-width` on `session:0`).
+    pub fn set_window_option(
+        &self,
+        target: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), TmuxError> {
+        self.run(&[
+            "set-option".into(),
+            "-w".into(),
+            "-t".into(),
+            target.into(),
+            name.into(),
+            value.into(),
+        ])?;
+        Ok(())
+    }
+
+    /// `split-window -t <target> [-e K=V]... -P -F #{pane_id} -- command...`
+    /// Returns the new pane's id (`%N`). Env via `-e` (tmux >= 3.2), same
+    /// secrecy rationale as `spawn`.
+    pub fn split_window(
+        &self,
+        target: &str,
+        env: &BTreeMap<String, String>,
+        command: &[String],
+    ) -> Result<String, TmuxError> {
+        let mut args: Vec<String> = vec![
+            "split-window".into(),
+            "-t".into(),
+            target.into(),
+            "-P".into(),
+            "-F".into(),
+            "#{pane_id}".into(),
+        ];
+        for (k, v) in env {
+            args.push("-e".into());
+            args.push(format!("{k}={v}"));
+        }
+        args.push("--".into());
+        args.extend(command.iter().cloned());
+        Ok(self.run(&args)?.trim().to_string())
+    }
+
+    pub fn select_pane(&self, pane: &str) -> Result<(), TmuxError> {
+        self.run(&["select-pane".into(), "-t".into(), pane.into()])?;
+        Ok(())
+    }
+
+    /// Pane-scoped user option (`set-option -p`), e.g. `@cortado_session`.
+    pub fn set_pane_option(&self, pane: &str, name: &str, value: &str) -> Result<(), TmuxError> {
+        self.run(&[
+            "set-option".into(),
+            "-p".into(),
+            "-t".into(),
+            pane.into(),
+            name.into(),
+            value.into(),
+        ])?;
+        Ok(())
+    }
+
+    /// All panes of a session (all windows), with the `@cortado_session` tag.
+    pub fn list_panes(&self, session: &str) -> Result<Vec<PaneInfo>, TmuxError> {
+        let out = self.run(&[
+            "list-panes".into(),
+            "-s".into(),
+            "-t".into(),
+            session.into(),
+            "-F".into(),
+            "#{pane_id}|#{@cortado_session}".into(),
+        ])?;
+        Ok(out.lines().filter_map(parse_pane_line).collect())
+    }
+
+    pub fn select_layout(&self, target: &str, layout: &str) -> Result<(), TmuxError> {
+        self.run(&[
+            "select-layout".into(),
+            "-t".into(),
+            target.into(),
+            layout.into(),
+        ])?;
+        Ok(())
+    }
+
+    /// True if any client is attached to the session.
+    pub fn has_client(&self, session: &str) -> Result<bool, TmuxError> {
+        let out = self.run(&[
+            "list-clients".into(),
+            "-t".into(),
+            session.into(),
+            "-F".into(),
+            "#{client_name}".into(),
+        ])?;
+        Ok(out.lines().any(|l| !l.is_empty()))
+    }
+
+    /// One session option's value (test/assertion helper).
+    pub fn show_session_option(&self, session: &str, name: &str) -> Result<String, TmuxError> {
+        let out = self.run(&[
+            "show-options".into(),
+            "-v".into(),
+            "-t".into(),
+            session.into(),
+            name.into(),
+        ])?;
+        Ok(out.trim().to_string())
+    }
 }
 
 /// Parse one `#{session_name}|#{session_created}|#{@cortado_model}` line.
@@ -194,6 +331,26 @@ pub fn version() -> Result<(u32, u32), TmuxError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_pane_lines_with_optional_session_tag() {
+        assert_eq!(
+            parse_pane_line("%3|cortado_newsletter_scout_1"),
+            Some(PaneInfo {
+                id: "%3".into(),
+                session_tag: Some("cortado_newsletter_scout_1".into()),
+            })
+        );
+        // Untagged pane (e.g. the rail) renders an empty trailing field.
+        assert_eq!(
+            parse_pane_line("%0|"),
+            Some(PaneInfo {
+                id: "%0".into(),
+                session_tag: None
+            })
+        );
+        assert_eq!(parse_pane_line("no-separator"), None);
+    }
 
     #[test]
     fn parses_three_field_lines_with_optional_model() {
