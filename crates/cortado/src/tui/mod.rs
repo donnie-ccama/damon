@@ -168,25 +168,6 @@ fn suspend<T>(
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use cortado_core::config::Launcher;
-
-    #[test]
-    fn bootstraps_only_outside_workspace_and_tmux_in_workspace_mode() {
-        let ws = |l: Launcher| {
-            let mut c = Config::default();
-            c.terminal.launcher = l;
-            c
-        };
-        assert!(should_bootstrap(&ws(Launcher::Workspace), false, false));
-        assert!(!should_bootstrap(&ws(Launcher::Workspace), true, false)); // already the rail
-        assert!(!should_bootstrap(&ws(Launcher::Workspace), false, true)); // user is in tmux
-        assert!(!should_bootstrap(&ws(Launcher::Ghostty), false, false)); // legacy mode
-    }
-}
-
 /// Run one Action through the same cores the CLI verbs use. Returns true on quit.
 fn execute_action(action: Action, m: &mut Model) -> bool {
     match action {
@@ -244,4 +225,23 @@ fn execute_action(action: Action, m: &mut Model) -> bool {
         Action::Edit { .. } => {} // handled in event_loop before execute_action
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cortado_core::config::Launcher;
+
+    #[test]
+    fn bootstraps_only_outside_workspace_and_tmux_in_workspace_mode() {
+        let ws = |l: Launcher| {
+            let mut c = Config::default();
+            c.terminal.launcher = l;
+            c
+        };
+        assert!(should_bootstrap(&ws(Launcher::Workspace), false, false));
+        assert!(!should_bootstrap(&ws(Launcher::Workspace), true, false)); // already the rail
+        assert!(!should_bootstrap(&ws(Launcher::Workspace), false, true)); // user is in tmux
+        assert!(!should_bootstrap(&ws(Launcher::Ghostty), false, false)); // legacy mode
+    }
 }
