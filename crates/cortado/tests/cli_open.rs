@@ -194,6 +194,51 @@ fn open_rejects_empty_keyring_account() {
         ));
 }
 
+/// Like `setup`, but the config selects the single-window workspace with a
+/// print window (no OS window in tests).
+fn setup_workspace(tag: &str) -> Env {
+    let e = setup(tag);
+    std::fs::write(
+        e.cfg.path().join("config.toml"),
+        format!(
+            "[tmux]\nsocket = \"{}\"\n[terminal]\nlauncher = \"workspace\"\nwindow = \"print\"\n",
+            e.socket
+        ),
+    )
+    .unwrap();
+    e
+}
+
+#[test]
+fn workspace_mode_spawns_agent_sessions_with_inner_tmux_disabled() {
+    let e = setup_workspace("wsmode");
+    cortado(&e)
+        .args(["open", "scout"])
+        .assert()
+        .success()
+        .stdout(contains("cortado_newsletter_scout_1"));
+
+    let tmux = cortado_tmux::Tmux::new(e.socket.clone());
+    let sessions = tmux.list().unwrap();
+    let agent_session = sessions
+        .iter()
+        .find(|s| s.starts_with("cortado_") && *s != "cortado_workspace")
+        .expect("agent session spawned");
+    assert_eq!(
+        tmux.show_session_option(agent_session, "prefix").unwrap(),
+        "None"
+    );
+    assert_eq!(
+        tmux.show_session_option(agent_session, "status").unwrap(),
+        "off"
+    );
+    // And the workspace exists with a viewer pane tagged for it.
+    let panes = tmux.list_panes("cortado_workspace").unwrap();
+    assert!(panes
+        .iter()
+        .any(|p| p.session_tag.as_deref() == Some(agent_session.as_str())));
+}
+
 #[test]
 fn open_reattaches_highest_n_numerically() {
     let e = setup("numeric");
