@@ -143,6 +143,7 @@ pub fn update(m: &mut Model, snap: &Snapshot, ev: Event) -> Vec<Action> {
         return update_preview(m, key);
     }
     match key.code {
+        KeyCode::Char('?') => m.popup = Some(Popup::Help),
         KeyCode::Char('q') => return vec![Action::Quit],
         KeyCode::Up | KeyCode::Char('k') if m.tab == Tab::Sessions => move_sel(m, snap, -1),
         KeyCode::Down | KeyCode::Char('j') if m.tab == Tab::Sessions => move_sel(m, snap, 1),
@@ -307,6 +308,10 @@ mod tests {
                     AgentRow {
                         slug: s("scout"),
                         display: Ok("Scout".into()),
+                        role: Some("Researches topics".into()),
+                        runtime: Some("claude".into()),
+                        default_model: Some("claude".into()),
+                        branch: Some("agent/scout".into()),
                         sessions: vec![],
                         memory: vec![MemFile {
                             label: "AGENT.md".into(),
@@ -316,6 +321,10 @@ mod tests {
                     AgentRow {
                         slug: s("writer"),
                         display: Ok("Writer".into()),
+                        role: None,
+                        runtime: Some("claude".into()),
+                        default_model: Some("claude".into()),
+                        branch: Some("agent/writer".into()),
                         sessions: vec![],
                         memory: vec![],
                     },

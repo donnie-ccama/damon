@@ -1,69 +1,98 @@
-//! Tokyo Night ("Night") palette + semantic style helpers. Accent-only:
-//! nothing here paints a pane background except the selection bar.
+//! Cortado's "espresso at night" palette and semantic styles.
+//!
+//! The terminal owns the canvas; we paint only selection and popup surfaces so
+//! the UI remains compatible with user Ghostty themes and transparency.
 use ratatui::style::{Color, Modifier, Style};
 
-const BG_HIGHLIGHT: Color = Color::Rgb(0x29, 0x2e, 0x42);
-const MUTED: Color = Color::Rgb(0x56, 0x5f, 0x89);
-/// MUTED at ~3x perceptual luminance: the bottom key menu must stay readable.
-const HINT: Color = Color::Rgb(0x8e, 0x9d, 0xe2);
-const BLUE: Color = Color::Rgb(0x7a, 0xa2, 0xf7);
-const CYAN: Color = Color::Rgb(0x7d, 0xcf, 0xff);
-const GREEN: Color = Color::Rgb(0x9e, 0xce, 0x6a);
-const MAGENTA: Color = Color::Rgb(0xbb, 0x9a, 0xf7);
-const RED: Color = Color::Rgb(0xf7, 0x76, 0x8e);
-const ORANGE: Color = Color::Rgb(0xff, 0x9e, 0x64);
+const INK: Color = Color::Rgb(0x1a, 0x1b, 0x26);
+const SELECTION: Color = Color::Rgb(0x32, 0x2b, 0x38);
+const TEXT: Color = Color::Rgb(0xe7, 0xdf, 0xd5);
+const MUTED: Color = Color::Rgb(0x78, 0x79, 0x8c);
+const BORDER: Color = Color::Rgb(0x45, 0x46, 0x58);
+const CORTADO: Color = Color::Rgb(0xd7, 0x9a, 0x68);
+const LAVENDER: Color = Color::Rgb(0xa9, 0xa1, 0xd6);
+const SAGE: Color = Color::Rgb(0x9f, 0xc0, 0x87);
+const ROSE: Color = Color::Rgb(0xd9, 0x7b, 0x87);
+const GOLD: Color = Color::Rgb(0xe3, 0xb3, 0x6b);
 
-/// Exposed for the view's style-assertion tests.
-pub(crate) const SELECTION_BG: Color = BG_HIGHLIGHT;
-pub(crate) const BORDER_FG: Color = BLUE;
+#[cfg(test)]
+pub(crate) const SELECTION_BG: Color = SELECTION;
+#[cfg(test)]
+pub(crate) const BORDER_FG: Color = BORDER;
+#[cfg(test)]
+pub(crate) const TEAM_FG: Color = LAVENDER;
 
 pub fn border() -> Style {
-    Style::default().fg(BORDER_FG)
+    Style::default().fg(BORDER)
+}
+pub fn border_focused() -> Style {
+    Style::default().fg(CORTADO)
 }
 pub fn title() -> Style {
-    Style::default().fg(BLUE).add_modifier(Modifier::BOLD)
+    Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
+}
+pub fn brand() -> Style {
+    Style::default().fg(CORTADO).add_modifier(Modifier::BOLD)
 }
 pub fn selection() -> Style {
     Style::default()
-        .bg(SELECTION_BG)
-        .fg(MAGENTA)
+        .bg(SELECTION)
+        .fg(TEXT)
         .add_modifier(Modifier::BOLD)
+}
+pub fn selection_marker() -> Style {
+    Style::default().fg(CORTADO).add_modifier(Modifier::BOLD)
 }
 pub fn tab_active() -> Style {
     Style::default()
-        .fg(CYAN)
+        .fg(CORTADO)
         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
 }
 pub fn tab_inactive() -> Style {
     Style::default().fg(MUTED)
 }
 pub fn team() -> Style {
-    Style::default().fg(BLUE).add_modifier(Modifier::BOLD)
+    Style::default().fg(LAVENDER).add_modifier(Modifier::BOLD)
 }
 pub fn header() -> Style {
-    Style::default().fg(BLUE).add_modifier(Modifier::BOLD)
+    Style::default().fg(MUTED).add_modifier(Modifier::BOLD)
+}
+pub fn primary() -> Style {
+    Style::default().fg(TEXT)
+}
+pub fn muted() -> Style {
+    Style::default().fg(MUTED)
 }
 pub fn badge() -> Style {
-    Style::default().fg(GREEN)
+    Style::default().fg(SAGE).add_modifier(Modifier::BOLD)
 }
 pub fn model_col() -> Style {
-    Style::default().fg(CYAN)
+    Style::default().fg(LAVENDER)
 }
 pub fn uptime_col() -> Style {
     Style::default().fg(MUTED)
 }
 pub fn invalid() -> Style {
-    Style::default().fg(RED)
+    Style::default().fg(ROSE).add_modifier(Modifier::BOLD)
 }
 pub fn hint() -> Style {
-    Style::default().fg(HINT)
+    Style::default().fg(LAVENDER)
+}
+pub fn key() -> Style {
+    Style::default().fg(CORTADO).add_modifier(Modifier::BOLD)
 }
 pub fn status_msg() -> Style {
-    Style::default().fg(ORANGE)
+    Style::default().fg(SAGE)
+}
+pub fn status_warn() -> Style {
+    Style::default().fg(GOLD)
 }
 pub fn status_error() -> Style {
-    Style::default().fg(RED)
+    Style::default().fg(ROSE)
 }
 pub fn error_block() -> Style {
-    Style::default().fg(RED)
+    Style::default().fg(ROSE)
+}
+pub fn popup() -> Style {
+    Style::default().bg(INK)
 }

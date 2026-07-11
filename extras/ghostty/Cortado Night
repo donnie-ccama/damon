@@ -1,0 +1,24 @@
+# Cortado's "espresso at night" Ghostty theme.
+background = #1a1b26
+foreground = #e7dfd5
+cursor-color = #d79a68
+cursor-text = #1a1b26
+selection-background = #322b38
+selection-foreground = #e7dfd5
+
+palette = 0=#1a1b26
+palette = 1=#d97b87
+palette = 2=#9fc087
+palette = 3=#e3b36b
+palette = 4=#8e9de2
+palette = 5=#a9a1d6
+palette = 6=#8fc7c2
+palette = 7=#e7dfd5
+palette = 8=#78798c
+palette = 9=#e8919b
+palette = 10=#b2cf9e
+palette = 11=#edc27f
+palette = 12=#a9b5ed
+palette = 13=#beb7e3
+palette = 14=#a7d8d2
+palette = 15=#fff8ef

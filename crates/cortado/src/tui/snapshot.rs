@@ -33,6 +33,10 @@ pub struct AgentRow {
     pub slug: Slug,
     /// Display name, or the agent.toml error (rendered INVALID).
     pub display: Result<String, String>,
+    pub role: Option<String>,
+    pub runtime: Option<String>,
+    pub default_model: Option<String>,
+    pub branch: Option<String>,
     pub sessions: Vec<SessionRow>,
     pub memory: Vec<MemFile>,
 }
@@ -62,6 +66,14 @@ impl Snapshot {
         for t in store.teams()? {
             let mut agents = Vec::new();
             for a in store.agents(&t.slug)? {
+                let role = a.agent.as_ref().ok().and_then(|f| f.agent.role.clone());
+                let runtime = a
+                    .agent
+                    .as_ref()
+                    .ok()
+                    .map(|f| f.agent.runtime.as_str().to_string());
+                let default_model = a.agent.as_ref().ok().map(|f| f.agent.default_model.clone());
+                let branch = a.agent.as_ref().ok().map(|f| f.repo.branch.clone());
                 let mut sessions: Vec<SessionRow> = live
                     .iter()
                     .filter_map(|s| {
@@ -82,6 +94,10 @@ impl Snapshot {
                         Ok(f) => Ok(f.agent.name.clone()),
                         Err(e) => Err(e.clone()),
                     },
+                    role,
+                    runtime,
+                    default_model,
+                    branch,
                     slug: a.slug,
                     sessions,
                 });

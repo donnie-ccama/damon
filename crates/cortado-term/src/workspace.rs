@@ -16,12 +16,20 @@ pub const AGENT_SESSION_OPTIONS: &[(&str, &str)] = &[("prefix", "None"), ("statu
 const WORKSPACE_OPTIONS: &[(&str, &str)] = &[
     ("mouse", "on"),
     ("status", "on"),
+    ("status-style", "bg=#1a1b26,fg=#78798c"),
+    ("status-left", " #[fg=#d79a68,bold]CORTADO#[default] "),
+    ("status-left-length", "16"),
     ("pane-border-status", "top"),
+    ("pane-border-style", "fg=#454658"),
+    ("pane-active-border-style", "fg=#d79a68"),
     (
         "pane-border-format",
-        " #{?#{@cortado_agent},#{@cortado_agent},cortado} ",
+        " #[fg=#78798c]#{?#{@cortado_agent},◇ #{@cortado_agent},roster}#[default] ",
     ),
-    ("status-right", " drag borders · C-b H/L resize "),
+    (
+        "status-right",
+        "#[fg=#a9a1d6]drag#[default] borders · #[fg=#d79a68,bold]C-b H/L#[default] resize ",
+    ),
 ];
 
 /// Fixed rail (sidebar) width in columns.

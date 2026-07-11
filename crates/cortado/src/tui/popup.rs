@@ -7,6 +7,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, PartialEq)]
 pub enum Popup {
+    Help,
     ModelPicker(ModelPicker),
     ConfirmKill { reference: String, count: usize },
     NewAgent(NewAgentForm),
@@ -177,6 +178,10 @@ pub fn update_popup(m: &mut Model, key: KeyEvent) -> Vec<Action> {
     let mut actions = Vec::new();
     let mut keep = true;
     match &mut popup {
+        Popup::Help => match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => keep = false,
+            _ => {}
+        },
         Popup::ModelPicker(p) => match key.code {
             KeyCode::Esc => keep = false,
             KeyCode::Up | KeyCode::Char('k') => p.selected = p.selected.saturating_sub(1),

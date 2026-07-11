@@ -13,8 +13,9 @@ use ratatui::Frame;
 pub fn render(f: &mut Frame, m: &Model, snap: &Snapshot, now_unix: i64) {
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
+    let rail_width = if f.area().width >= 100 { 34 } else { 30 };
     let [rail, right] =
-        Layout::horizontal([Constraint::Length(30), Constraint::Min(0)]).areas(main);
+        Layout::horizontal([Constraint::Length(rail_width), Constraint::Min(0)]).areas(main);
     render_rail(f, rail, m, snap);
     render_right(f, right, m, snap, now_unix);
     render_status(f, status, m);
@@ -38,10 +39,15 @@ pub fn render_error(f: &mut Frame, msg: &str) {
 
 fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
     let mut items: Vec<ListItem> = Vec::new();
+    items.push(ListItem::new(Line::styled(
+        " C O R T A D O",
+        theme::brand(),
+    )));
+    items.push(ListItem::new(""));
     for t in &snap.teams {
         let sel = m.sel == Some(RailSel::Team(t.slug.clone()));
         let line = match &t.display {
-            Ok(name) => Line::styled(name.clone(), theme::team()),
+            Ok(name) => Line::styled(format!(" {}", name.to_uppercase()), theme::team()),
             Err(_) => Line::styled(format!("{} INVALID", t.slug), theme::invalid()),
         };
         items.push(selected(ListItem::new(line), sel));
@@ -49,10 +55,29 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
             let sel = m.sel == Some(RailSel::Agent(t.slug.clone(), a.slug.clone()));
             let line = match &a.display {
                 Ok(name) => {
-                    let mut spans = vec![Span::raw(format!("  {name}"))];
+                    let marker = if sel {
+                        "›"
+                    } else if a.sessions.is_empty() {
+                        "◇"
+                    } else {
+                        "◆"
+                    };
+                    let mut spans = vec![
+                        Span::styled(
+                            format!(" {marker} "),
+                            if sel {
+                                theme::selection_marker()
+                            } else if a.sessions.is_empty() {
+                                theme::muted()
+                            } else {
+                                theme::badge()
+                            },
+                        ),
+                        Span::raw(name.clone()),
+                    ];
                     if !a.sessions.is_empty() {
                         spans.push(Span::styled(
-                            format!(" ●{}", a.sessions.len()),
+                            format!("  {} live", a.sessions.len()),
                             theme::badge(),
                         ));
                     }
@@ -69,12 +94,24 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
             theme::invalid(),
         )));
     }
+    let agent_count: usize = snap.teams.iter().map(|t| t.agents.len()).sum();
+    let live_count: usize = snap
+        .teams
+        .iter()
+        .flat_map(|t| &t.agents)
+        .map(|a| a.sessions.len())
+        .sum();
+    items.push(ListItem::new(""));
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled(format!(" {live_count} live"), theme::badge()),
+        Span::styled(format!("  ·  {agent_count} agents"), theme::muted()),
+    ])));
     f.render_widget(
         List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(theme::border())
-                .title(Line::styled("agents", theme::title())),
+                .border_style(theme::border_focused())
+                .title(Line::styled(" roster ", theme::title())),
         ),
         area,
     );
@@ -89,7 +126,13 @@ fn selected(item: ListItem<'_>, on: bool) -> ListItem<'_> {
 }
 
 fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot, now_unix: i64) {
-    let [bar, content] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    let [identity, bar, content] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    render_identity(f, identity, m, snap);
     let idx = match m.tab {
         Tab::Sessions => 0,
         Tab::Memory => 1,
@@ -108,18 +151,98 @@ fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot, now_unix:
     }
 }
 
+fn render_identity(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
+    let Some(agent) = m.selected_agent(snap) else {
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("  Choose an agent", theme::title()),
+                Span::styled("  ·  then press Enter to open", theme::muted()),
+            ])),
+            area,
+        );
+        return;
+    };
+    let name = agent.display.as_deref().unwrap_or(agent.slug.as_str());
+    let (team_name, reference) = match m.sel.as_ref() {
+        Some(RailSel::Agent(team, agent_slug)) => {
+            let display = snap
+                .teams
+                .iter()
+                .find(|t| &t.slug == team)
+                .and_then(|t| t.display.as_ref().ok())
+                .map(String::as_str)
+                .unwrap_or(team.as_str());
+            (display, format!("{team}/{agent_slug}"))
+        }
+        _ => ("", String::new()),
+    };
+    let state = if agent.sessions.is_empty() {
+        "IDLE"
+    } else {
+        "● LIVE"
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(format!("  {name}"), theme::title()),
+            Span::raw("   "),
+            Span::styled(
+                state,
+                if agent.sessions.is_empty() {
+                    theme::muted()
+                } else {
+                    theme::badge()
+                },
+            ),
+            Span::styled(
+                agent
+                    .role
+                    .as_deref()
+                    .map(|role| format!("  ·  {role}"))
+                    .unwrap_or_default(),
+                theme::muted(),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  {team_name}"), theme::model_col()),
+            Span::styled(format!("  ·  {reference}"), theme::muted()),
+            Span::styled(
+                format!(
+                    "  ·  {} / {}  ·  {}",
+                    agent.runtime.as_deref().unwrap_or("?"),
+                    agent.default_model.as_deref().unwrap_or("?"),
+                    agent.branch.as_deref().unwrap_or("no branch")
+                ),
+                theme::muted(),
+            ),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(lines), area);
+}
+
 fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix: i64) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
         .title(Line::styled("sessions", theme::title()));
     let Some(agent) = agent else {
-        f.render_widget(Paragraph::new("select an agent").block(block), area);
+        render_empty(
+            f,
+            area,
+            block,
+            "◇",
+            "No agent selected",
+            "Choose one from the roster on the left",
+        );
         return;
     };
     if agent.sessions.is_empty() {
         f.render_widget(
-            Paragraph::new("no live sessions — n spawns one").block(block),
+            empty_paragraph(
+                "◇",
+                "No session is running",
+                "Press n to choose a model and start one",
+            )
+            .block(block),
             area,
         );
         return;
@@ -147,7 +270,12 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
                 Constraint::Length(8),
             ],
         )
-        .header(Row::new(vec!["session", "model", "uptime"]).style(theme::header()))
+        .header(
+            Row::new(vec!["SESSION", "MODEL", "UPTIME"])
+                .style(theme::header())
+                .bottom_margin(1),
+        )
+        .row_highlight_style(theme::selection())
         .block(block),
         area,
     );
@@ -191,7 +319,14 @@ fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>)
         .border_style(theme::border())
         .title(Line::styled("memory", theme::title()));
     let Some(agent) = agent else {
-        f.render_widget(Paragraph::new("select an agent").block(block), area);
+        render_empty(
+            f,
+            area,
+            block,
+            "◇",
+            "No agent selected",
+            "Choose one from the roster on the left",
+        );
         return;
     };
     let items: Vec<ListItem> = agent
@@ -204,22 +339,108 @@ fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>)
 }
 
 fn render_status(f: &mut Frame, area: Rect, m: &Model) {
-    let (text, style) = match &m.status {
-        Some(s) if s.starts_with("error") => (s.clone(), theme::status_error()),
-        Some(s) => (s.clone(), theme::status_msg()),
-        None => (
-            "n new session · Enter open · e edit · x kill · N new agent · Tab/m tabs · q quit"
-                .to_string(),
-            theme::hint(),
-        ),
+    if let Some(s) = &m.status {
+        let (icon, style) = if s.starts_with("error") {
+            ("×", theme::status_error())
+        } else if s.contains("warning") || s.starts_with("no ") {
+            ("!", theme::status_warn())
+        } else {
+            ("✓", theme::status_msg())
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!(" {icon} "), style),
+                Span::styled(s.clone(), style),
+            ])),
+            area,
+        );
+        return;
+    }
+    let actions = match m.tab {
+        Tab::Sessions => [
+            ("↑↓", "Navigate"),
+            ("Enter", "Open"),
+            ("n", "New session"),
+            ("Tab", "Memory"),
+            ("?", "Help"),
+            ("q", "Quit"),
+        ],
+        Tab::Memory => [
+            ("↑↓", "Agent"),
+            ("j/k", "File"),
+            ("Enter", "Preview"),
+            ("Tab", "Sessions"),
+            ("?", "Help"),
+            ("q", "Quit"),
+        ],
     };
-    f.render_widget(Paragraph::new(text).style(style), area);
+    let mut spans = vec![Span::raw(" ")];
+    for (i, (key, label)) in actions.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("   ", theme::muted()));
+        }
+        spans.push(Span::styled(*key, theme::key()));
+        spans.push(Span::styled(format!(" {label}"), theme::hint()));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn empty_paragraph<'a>(icon: &'a str, title: &'a str, hint: &'a str) -> Paragraph<'a> {
+    Paragraph::new(vec![
+        Line::from(""),
+        Line::styled(format!("    {icon}"), theme::brand()),
+        Line::styled(format!("    {title}"), theme::title()),
+        Line::styled(format!("    {hint}"), theme::muted()),
+    ])
+}
+
+fn render_empty(f: &mut Frame, area: Rect, block: Block<'_>, icon: &str, title: &str, hint: &str) {
+    f.render_widget(empty_paragraph(icon, title, hint).block(block), area);
 }
 
 fn render_popup(f: &mut Frame, popup: &Popup) {
-    let area = centered(f.area(), 60, 12);
+    let height = match popup {
+        Popup::NewAgent(_) => 14,
+        Popup::Help => 18,
+        _ => 12,
+    };
+    let area = centered(f.area(), 60, height);
     f.render_widget(Clear, area);
+    f.render_widget(Block::default().style(theme::popup()), area);
     match popup {
+        Popup::Help => {
+            let rows = [
+                ("↑ / ↓", "Navigate agents"),
+                ("Enter", "Open or reattach selected agent"),
+                ("n", "Start a new session with a model"),
+                ("N", "Create a new agent"),
+                ("Tab / m", "Switch Sessions and Memory"),
+                ("e", "Edit selected memory file"),
+                ("x", "End selected agent's sessions"),
+                ("q", "Leave Cortado (sessions keep running)"),
+            ];
+            let mut lines = vec![
+                Line::styled("  Work alongside persistent agents.", theme::primary()),
+                Line::from(""),
+            ];
+            lines.extend(rows.into_iter().map(|(key, action)| {
+                Line::from(vec![
+                    Span::styled(format!("  {key:<11}"), theme::key()),
+                    Span::styled(action, theme::muted()),
+                ])
+            }));
+            lines.push(Line::from(""));
+            lines.push(Line::styled("  Press ? or Esc to return", theme::hint()));
+            f.render_widget(
+                Paragraph::new(lines).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(theme::border_focused())
+                        .title(Line::styled(" Cortado help ", theme::brand())),
+                ),
+                area,
+            );
+        }
         Popup::ModelPicker(p) => {
             let items: Vec<ListItem> = p
                 .models
@@ -235,7 +456,7 @@ fn render_popup(f: &mut Frame, popup: &Popup) {
                         .borders(Borders::ALL)
                         .border_style(theme::border())
                         .title(Line::styled(
-                            "new session — pick model (Enter/Esc)",
+                            " new session · choose a model ",
                             theme::title(),
                         )),
                 ),
@@ -244,11 +465,25 @@ fn render_popup(f: &mut Frame, popup: &Popup) {
         }
         Popup::ConfirmKill { reference, count } => {
             f.render_widget(
-                Paragraph::new(format!("kill {count} session(s) of {reference}?  y / n")).block(
+                Paragraph::new(vec![
+                    Line::from(""),
+                    Line::styled(
+                        format!("  End {count} session(s) for {reference}?"),
+                        theme::primary(),
+                    ),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("  Enter/y", theme::invalid()),
+                        Span::styled(" Kill", theme::muted()),
+                        Span::styled("     Esc/n", theme::key()),
+                        Span::styled(" Cancel", theme::muted()),
+                    ]),
+                ])
+                .block(
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(theme::border())
-                        .title(Line::styled("confirm kill", theme::title())),
+                        .title(Line::styled(" confirm kill ", theme::invalid())),
                 ),
                 area,
             );
@@ -259,8 +494,25 @@ fn render_popup(f: &mut Frame, popup: &Popup) {
 
 fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
     let field = |label: &str, value: &str, focused: bool| {
-        let marker = if focused { "▶ " } else { "  " };
-        Line::from(format!("{marker}{label:<9}{value}"))
+        let marker = if focused { "›" } else { " " };
+        Line::from(vec![
+            Span::styled(
+                format!(" {marker} {label:<9}"),
+                if focused {
+                    theme::key()
+                } else {
+                    theme::muted()
+                },
+            ),
+            Span::styled(
+                value.to_string(),
+                if focused {
+                    theme::primary()
+                } else {
+                    theme::muted()
+                },
+            ),
+        ])
     };
     let source = match form.source {
         RepoChoice::New => "new",
@@ -273,7 +525,11 @@ fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
         RepoChoice::Worktree => "path",
     };
     let lines = vec![
-        Line::from(format!("  team     {}", form.team)),
+        Line::from(vec![
+            Span::styled("   team      ", theme::muted()),
+            Span::styled(form.team.to_string(), theme::model_col()),
+        ]),
+        Line::from(""),
         field("name", &form.name, form.focus == FormFocus::Name),
         field("role", &form.role, form.focus == FormFocus::Role),
         field(
@@ -284,14 +540,24 @@ fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
         field("source", source, form.focus == FormFocus::Source),
         field(target_label, &form.target, form.focus == FormFocus::Target),
         field("branch", &form.branch, form.focus == FormFocus::Branch),
-        Line::from("  Tab next · ←/→ cycle · Enter create · Esc cancel"),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("   Tab", theme::key()),
+            Span::styled(" Next", theme::muted()),
+            Span::styled("   ←/→", theme::key()),
+            Span::styled(" Change", theme::muted()),
+            Span::styled("   Enter", theme::key()),
+            Span::styled(" Create", theme::muted()),
+            Span::styled("   Esc", theme::key()),
+            Span::styled(" Cancel", theme::muted()),
+        ]),
     ];
     f.render_widget(
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme::border())
-                .title(Line::styled("new agent", theme::title())),
+                .title(Line::styled(" new agent ", theme::title())),
         ),
         area,
     );
@@ -339,6 +605,10 @@ mod tests {
                 agents: vec![AgentRow {
                     slug: s("scout"),
                     display: Ok("Scout".into()),
+                    role: Some("Researches topics".into()),
+                    runtime: Some("claude".into()),
+                    default_model: Some("claude".into()),
+                    branch: Some("agent/scout".into()),
                     sessions: vec![SessionRow {
                         name: "cortado_newsletter_scout_1".into(),
                         n: 1,
@@ -383,7 +653,8 @@ mod tests {
         let text = rendered(&m, &snap());
         assert!(text.contains("Newsletter"));
         assert!(text.contains("Scout"));
-        assert!(text.contains("●1"));
+        assert!(text.contains("1 live"));
+        assert!(text.contains("C O R T A D O"));
     }
 
     #[test]
@@ -422,7 +693,7 @@ mod tests {
     fn status_line_shows_message_or_hints() {
         let mut m = Model::default();
         let text = rendered(&m, &snap());
-        assert!(text.contains("q quit"));
+        assert!(text.contains("q Quit"));
         m.status = Some("session cortado_newsletter_scout_1".into());
         let text = rendered(&m, &snap());
         assert!(text.contains("session cortado_newsletter_scout_1"));
@@ -438,7 +709,7 @@ mod tests {
             ..Default::default()
         };
         let text = rendered(&m, &snap());
-        assert!(text.contains("kill 2 session(s) of newsletter/scout?"));
+        assert!(text.contains("End 2 session(s) for newsletter/scout?"));
     }
 
     #[test]
@@ -518,7 +789,7 @@ mod tests {
         };
         let terminal = rendered_terminal(&m, &snap());
         let text = buffer_text(terminal.backend());
-        assert!(text.contains("pick model"));
+        assert!(text.contains("choose a model"));
         assert!(text.contains("Claude (claude)"));
         assert!(text.contains("Kimi K2 (kimi)"));
         let rev = selected_bg_text(terminal.backend());
@@ -567,8 +838,8 @@ mod tests {
     }
 
     #[test]
-    fn selected_team_keeps_blue_fg() {
-        // A selected TEAM row keeps its blue team fg — semantic color wins
+    fn selected_team_keeps_semantic_fg() {
+        // A selected TEAM row keeps its lavender team fg — semantic color wins
         // over the magenta selection fg, the same way a selected INVALID row
         // stays red. The selection bg still marks the row.
         let m = Model {
@@ -580,7 +851,7 @@ mod tests {
             .draw(|f| render(f, &m, &snap(), 1000 + 3723))
             .unwrap();
         assert!(any_cell_matches(terminal.backend(), |c| {
-            c.fg == crate::tui::theme::BORDER_FG && c.bg == crate::tui::theme::SELECTION_BG
+            c.fg == crate::tui::theme::TEAM_FG && c.bg == crate::tui::theme::SELECTION_BG
         }));
     }
 
@@ -609,10 +880,10 @@ mod tests {
         };
         let text = rendered(&m, &snap());
         assert!(text.contains("new agent"));
-        assert!(text.contains("team     newsletter"));
-        assert!(text.contains("▶ name     Editor")); // Name focused on a fresh form
+        assert!(text.contains("team      newsletter"));
+        assert!(text.contains("› name     Editor")); // Name focused on a fresh form
         assert!(text.contains("runtime  claude"));
         assert!(text.contains("source   new"));
-        assert!(text.contains("Tab next"));
+        assert!(text.contains("Tab Next"));
     }
 }

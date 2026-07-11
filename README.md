@@ -212,6 +212,22 @@ The reminder lives in the workspace status bar: *drag borders · C-b H/L
 resize*. Cortado re-balances widths only when it adds a pane; your manual
 sizes are otherwise left alone.
 
+### Optional Ghostty presentation profile
+
+Cortado ships a matching **Cortado Night** theme and a restrained Ghostty
+profile under `extras/ghostty/`. They are optional: the TUI remains readable
+with the user's existing terminal theme.
+
+```bash
+mkdir -p ~/.config/ghostty/themes
+cp "extras/ghostty/Cortado Night" ~/.config/ghostty/themes/
+# Review extras/ghostty/cortado.conf, then copy the settings you want into
+# ~/.config/ghostty/config.ghostty
+```
+
+The profile uses subtle transparency and blur, balanced window padding, and a
+transparent macOS titlebar. Font family is deliberately not prescribed.
+
 ## Configuration
 
 `~/.config/cortado/config.toml` (all keys optional — these are the defaults):
