@@ -23,16 +23,49 @@ use std::io::IsTerminal;
 use std::time::Duration;
 
 pub fn run() -> anyhow::Result<()> {
+    let config = Config::load()?;
+    if should_bootstrap(
+        &config,
+        std::env::var_os("CORTADO_WORKSPACE").is_some(),
+        std::env::var_os("TMUX").is_some(),
+    ) {
+        return bootstrap_workspace(&config);
+    }
     if !std::io::stdout().is_terminal() {
         anyhow::bail!("cortado ui needs an interactive terminal");
     }
-    let config = Config::load()?;
     // ratatui::init() enables raw mode + alternate screen and installs a
     // panic hook that restores the terminal.
     let terminal = ratatui::init();
     let result = event_loop(terminal, &config);
     ratatui::restore();
     result
+}
+
+/// Workspace mode, invoked from a plain shell: become the workspace instead
+/// of drawing the rail inline. Inside the workspace pane (CORTADO_WORKSPACE)
+/// or any tmux ($TMUX) we draw the rail directly.
+fn should_bootstrap(config: &Config, in_workspace_pane: bool, in_tmux: bool) -> bool {
+    config.terminal.launcher == cortado_core::config::Launcher::Workspace
+        && !in_workspace_pane
+        && !in_tmux
+}
+
+fn bootstrap_workspace(config: &Config) -> anyhow::Result<()> {
+    let tmux = Tmux::new(config.tmux.socket.clone());
+    let rail = vec![
+        std::env::current_exe()?.display().to_string(),
+        "ui".to_string(),
+    ];
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    cortado_term::workspace::ensure_workspace(&tmux, std::path::Path::new(&home), &rail)?;
+    cortado_term::open_window(
+        config.terminal.window,
+        &config.tmux.socket,
+        cortado_term::workspace::WORKSPACE_SESSION,
+    )?;
+    println!("workspace {}", cortado_term::workspace::WORKSPACE_SESSION);
+    Ok(())
 }
 
 fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow::Result<()> {
@@ -133,6 +166,25 @@ fn suspend<T>(
     enter.and(raw)?;
     terminal.clear()?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cortado_core::config::Launcher;
+
+    #[test]
+    fn bootstraps_only_outside_workspace_and_tmux_in_workspace_mode() {
+        let ws = |l: Launcher| {
+            let mut c = Config::default();
+            c.terminal.launcher = l;
+            c
+        };
+        assert!(should_bootstrap(&ws(Launcher::Workspace), false, false));
+        assert!(!should_bootstrap(&ws(Launcher::Workspace), true, false)); // already the rail
+        assert!(!should_bootstrap(&ws(Launcher::Workspace), false, true)); // user is in tmux
+        assert!(!should_bootstrap(&ws(Launcher::Ghostty), false, false)); // legacy mode
+    }
 }
 
 /// Run one Action through the same cores the CLI verbs use. Returns true on quit.

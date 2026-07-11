@@ -134,8 +134,10 @@ destroys the session — the rail pane keeps it alive.
 - Viewer-workspace chosen over agents-as-panes restructure (breaks
   persistence model) and tabs-only via `link-window` (rail and agent not
   simultaneously visible). User picked viewer-workspace explicitly.
-- `prefix None`/`status off` applied to **all** agent sessions at spawn:
-  standalone Ghostty attach never needed the inner prefix either, and one
-  consistent spawn path beats two.
+- `prefix None`/`status off` applied to agent sessions **only when spawned in
+  workspace mode**: in legacy one-window-per-agent mode the inner session IS
+  the window's tmux, and disabling its prefix would kill splits/detach there —
+  the very bug this project fixes. Sessions spawned under one mode and viewed
+  under the other are a documented edge case.
 - Default launcher becomes `workspace` for new installs (user approved the
   recommended flow); existing config files are never rewritten.
