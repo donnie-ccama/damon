@@ -1,4 +1,6 @@
 //! Terminal launchers: open a window attached to a cortado tmux session.
+pub mod workspace;
+
 use std::process::Command;
 
 pub trait TerminalLauncher {
