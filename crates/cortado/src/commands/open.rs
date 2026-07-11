@@ -133,7 +133,7 @@ pub fn open_session(
         name
     };
 
-    cortado_term::launcher_for(config.terminal.launcher, config.tmux.socket.clone())
+    cortado_term::launcher_for(&config.terminal, config.tmux.socket.clone())
         .open(&session, &format!("{}/{}", entry.team, entry.slug))?;
     Ok(OpenOutcome { session, warnings })
 }
