@@ -554,6 +554,8 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "cortado-core",
+ "cortado-tmux",
+ "tempfile",
  "thiserror",
 ]
 

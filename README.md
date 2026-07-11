@@ -180,6 +180,19 @@ Left pane is the rail (teams → agents, live session count badged green when
 scrollable preview) tabs; the status line shows the last action's result or
 error, using the same error text the CLI prints on failure.
 
+## Workspace
+
+With `launcher = "workspace"` (the default), everything lives in **one**
+terminal window: `cortado ui` runs as a slim rail pane inside a
+`cortado_workspace` tmux session, and every opened agent becomes a viewer
+pane beside it, nested-attached to the agent's own tmux session. All tmux
+keys are native — `C-b %` / `C-b "` split, `C-b z` zooms an agent
+full-screen, the mouse resizes panes — and every pane is labeled with its
+agent. Closing a viewer pane (or the whole window) only detaches; agents
+keep running, exactly as before. `cortado open` from any shell lands the
+agent in the workspace, starting it if needed. The old
+one-window-per-agent behavior remains: set `launcher = "ghostty"`.
+
 ## Configuration
 
 `~/.config/cortado/config.toml` (all keys optional — these are the defaults):
@@ -193,7 +206,8 @@ default_runtime = "claude"
 socket = "cortado"          # dedicated server; your personal tmux is untouched
 
 [terminal]
-launcher = "ghostty"      # ghostty | env-terminal | print
+launcher = "workspace"    # workspace | ghostty | env-terminal | print
+window = "ghostty"        # workspace mode's one OS window: ghostty | env-terminal | print
 ```
 
 `~/.config/cortado/models.toml` — the model registry. Add a model by adding a
@@ -258,6 +272,9 @@ a complete migration.
   Stateless, 2s refresh, zero clippy warnings workspace-wide.
 - **M4** — `cortado memory --edit`, doctor's string-driven tmux gate, `cortado
   memory` command, packaging (Homebrew / AUR).
+- **M5 (shipped)** — single-window workspace: `cortado ui` rail + agent
+  viewer panes in one tmux client (`launcher = "workspace"`, the new
+  default), native tmux keys everywhere, agent sessions untouched.
 
 Design docs live in [docs/superpowers/specs](docs/superpowers/specs) and
 [docs/superpowers/plans](docs/superpowers/plans).

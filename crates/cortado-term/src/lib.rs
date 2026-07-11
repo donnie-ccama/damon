@@ -1,4 +1,6 @@
 //! Terminal launchers: open a window attached to a cortado tmux session.
+pub mod workspace;
+
 use std::process::Command;
 
 pub trait TerminalLauncher {
@@ -91,12 +93,61 @@ impl TerminalLauncher for PrintLauncher {
     }
 }
 
+/// Open one OS window attached to `session`, per the configured window kind.
+pub fn open_window(
+    window: cortado_core::config::Window,
+    socket: &str,
+    session: &str,
+) -> anyhow::Result<()> {
+    use cortado_core::config::Window as W;
+    let launcher: Box<dyn TerminalLauncher> = match window {
+        W::Ghostty => Box::new(GhosttyLauncher {
+            socket: socket.to_string(),
+        }),
+        W::EnvTerminal => Box::new(EnvTerminalLauncher {
+            socket: socket.to_string(),
+        }),
+        W::Print => Box::new(PrintLauncher {
+            socket: socket.to_string(),
+        }),
+    };
+    launcher.open(session, session)
+}
+
+/// Single-window mode: agents open as viewer panes inside the
+/// `cortado_workspace` session; at most one OS window is ever launched.
+pub struct WorkspaceLauncher {
+    pub socket: String,
+    pub window: cortado_core::config::Window,
+}
+
+impl TerminalLauncher for WorkspaceLauncher {
+    fn open(&self, session: &str, title: &str) -> anyhow::Result<()> {
+        let tmux = cortado_tmux::Tmux::new(self.socket.clone());
+        let rail = vec![
+            std::env::current_exe()?.display().to_string(),
+            "ui".to_string(),
+        ];
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        workspace::ensure_workspace(&tmux, std::path::Path::new(&home), &rail)?;
+        workspace::open_viewer(&tmux, session, title)?;
+        if !tmux.has_client(workspace::WORKSPACE_SESSION)? {
+            open_window(self.window, &self.socket, workspace::WORKSPACE_SESSION)?;
+        }
+        Ok(())
+    }
+}
+
 pub fn launcher_for(
-    cfg: cortado_core::config::Launcher,
+    cfg: &cortado_core::config::TerminalCfg,
     socket: String,
 ) -> Box<dyn TerminalLauncher> {
     use cortado_core::config::Launcher as L;
-    match cfg {
+    match cfg.launcher {
+        L::Workspace => Box::new(WorkspaceLauncher {
+            socket,
+            window: cfg.window,
+        }),
         L::Ghostty => Box::new(GhosttyLauncher { socket }),
         L::EnvTerminal => Box::new(EnvTerminalLauncher { socket }),
         L::Print => Box::new(PrintLauncher { socket }),
@@ -140,6 +191,20 @@ mod tests {
         let (bin, args) = ghostty_invocation(Os::Linux, "cortado", "s1");
         assert_eq!(bin, "ghostty");
         assert_eq!(args[0], "-e");
+    }
+
+    #[test]
+    fn open_window_print_never_fails_and_workspace_launcher_constructs() {
+        open_window(
+            cortado_core::config::Window::Print,
+            "cortado",
+            workspace::WORKSPACE_SESSION,
+        )
+        .unwrap();
+        let _ = WorkspaceLauncher {
+            socket: "cortado".into(),
+            window: cortado_core::config::Window::Print,
+        };
     }
 
     #[test]

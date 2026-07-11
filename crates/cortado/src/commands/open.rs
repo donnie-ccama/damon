@@ -117,6 +117,15 @@ pub fn open_session(
                 "could not tag session model ({e}); it will render as ?"
             ));
         }
+        // Workspace mode: the outer workspace tmux owns all keys and draws
+        // the only status bar; the agent session must not compete.
+        if config.terminal.launcher == cortado_core::config::Launcher::Workspace {
+            if let Err(e) =
+                tmux.set_session_options(&name, cortado_term::workspace::AGENT_SESSION_OPTIONS)
+            {
+                warnings.push(format!("could not set workspace session options: {e}"));
+            }
+        }
 
         let event = SessionEvent {
             ts: chrono::Utc::now(),
@@ -133,7 +142,7 @@ pub fn open_session(
         name
     };
 
-    cortado_term::launcher_for(config.terminal.launcher, config.tmux.socket.clone())
+    cortado_term::launcher_for(&config.terminal, config.tmux.socket.clone())
         .open(&session, &format!("{}/{}", entry.team, entry.slug))?;
     Ok(OpenOutcome { session, warnings })
 }

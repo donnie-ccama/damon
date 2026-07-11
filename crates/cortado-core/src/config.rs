@@ -43,12 +43,15 @@ impl Default for TmuxCfg {
 #[serde(default)]
 pub struct TerminalCfg {
     pub launcher: Launcher,
+    /// How workspace mode opens its one OS window. Ignored by other launchers.
+    pub window: Window,
 }
 
 impl Default for TerminalCfg {
     fn default() -> Self {
         TerminalCfg {
-            launcher: Launcher::Ghostty,
+            launcher: Launcher::Workspace,
+            window: Window::Ghostty,
         }
     }
 }
@@ -56,6 +59,15 @@ impl Default for TerminalCfg {
 #[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Launcher {
+    Workspace,
+    Ghostty,
+    EnvTerminal,
+    Print,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Window {
     Ghostty,
     EnvTerminal,
     Print,
@@ -133,7 +145,20 @@ mod tests {
         assert_eq!(c.general.root, "~/cortado");
         assert_eq!(c.general.default_runtime, "claude");
         assert_eq!(c.tmux.socket, "cortado");
+        assert_eq!(c.terminal.launcher, Launcher::Workspace);
+        assert_eq!(c.terminal.window, Window::Ghostty);
+    }
+
+    #[test]
+    fn workspace_launcher_and_window_parse() {
+        let c: Config =
+            toml::from_str("[terminal]\nlauncher = \"workspace\"\nwindow = \"print\"\n").unwrap();
+        assert_eq!(c.terminal.launcher, Launcher::Workspace);
+        assert_eq!(c.terminal.window, Window::Print);
+        // Old configs without `window` still parse.
+        let c: Config = toml::from_str("[terminal]\nlauncher = \"ghostty\"\n").unwrap();
         assert_eq!(c.terminal.launcher, Launcher::Ghostty);
+        assert_eq!(c.terminal.window, Window::Ghostty);
     }
 
     #[test]
