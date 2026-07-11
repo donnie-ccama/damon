@@ -97,6 +97,7 @@ pub fn launcher_for(
 ) -> Box<dyn TerminalLauncher> {
     use cortado_core::config::Launcher as L;
     match cfg {
+        L::Workspace => Box::new(PrintLauncher { socket }), // placeholder until WorkspaceLauncher (Task 4)
         L::Ghostty => Box::new(GhosttyLauncher { socket }),
         L::EnvTerminal => Box::new(EnvTerminalLauncher { socket }),
         L::Print => Box::new(PrintLauncher { socket }),
