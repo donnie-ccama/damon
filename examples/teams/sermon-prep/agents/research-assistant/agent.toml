@@ -1,0 +1,9 @@
+[agent]
+name = "Research Assistant"
+role = "Produces the exegetical study via the /exegetical-study skill and the Logos Interaction MCP"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/research-assistant"
