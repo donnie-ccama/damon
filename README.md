@@ -205,12 +205,19 @@ and the rail stays pinned at 34 columns. To resize panes yourself:
 | Control | Action |
 |---|---|
 | mouse drag on a pane border | resize freely |
+| right-click inside an agent or scratch pane | zoom, split, arrange, or close panes |
 | `C-b H` / `C-b L` | pane 5 columns narrower / wider (repeatable: keep tapping `H`/`L` after one `C-b`) |
 | `C-b J` / `C-b K` | pane 3 rows taller / shorter |
 
 The reminder lives in the workspace status bar: *drag borders · C-b H/L
 resize*. Cortado re-balances widths only when it adds a pane; your manual
 sizes are otherwise left alone.
+
+The right-click pane menu can zoom the selected pane, open a scratch shell
+beside or below it, stack all viewers vertically to the right of the roster,
+restore the side-by-side layout, or close the selected pane. Scratch shells
+start in the selected pane's working directory. None of these actions stop the
+agent session behind a viewer pane.
 
 ### Optional Ghostty presentation profile
 

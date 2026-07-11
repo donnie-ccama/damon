@@ -135,6 +135,45 @@ fn open_opencode_spawns_and_writes_agents_md() {
 }
 
 #[test]
+fn open_missing_opencode_fails_before_spawn_or_log() {
+    let e = setup("opencode-missing");
+    cortado(&e)
+        .args([
+            "agent",
+            "new",
+            "newsletter/opencode",
+            "--runtime",
+            "opencode",
+            "--repo-new",
+        ])
+        .assert()
+        .success();
+
+    cortado(&e)
+        .env("CORTADO_BIN_OPENCODE", "definitely-not-a-runtime-binary")
+        .args(["open", "opencode"])
+        .assert()
+        .failure()
+        .stderr(
+            contains("OpenCode runtime executable")
+                .and(contains("brew install anomalyco/tap/opencode"))
+                .and(contains("CORTADO_BIN_OPENCODE")),
+        );
+
+    let tmux = cortado_tmux::Tmux::new(e.socket.clone());
+    assert!(!tmux
+        .list()
+        .unwrap()
+        .iter()
+        .any(|name| name.contains("opencode")));
+    let log = e
+        .root
+        .path()
+        .join("teams/newsletter/agents/opencode/logs/sessions.jsonl");
+    assert!(!log.exists(), "failed launch must not be logged as a spawn");
+}
+
+#[test]
 fn open_resolves_keyring_placeholder_via_seam() {
     let e = setup("keyseam");
     std::fs::write(

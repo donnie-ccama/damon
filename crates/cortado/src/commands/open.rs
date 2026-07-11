@@ -7,6 +7,7 @@ use cortado_core::store::Store;
 use cortado_tmux::Tmux;
 use keyring::Entry;
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 #[derive(serde::Serialize)]
 struct SessionEvent<'a> {
@@ -100,7 +101,23 @@ pub fn open_session(
         env.insert("CORTADO_MODEL".into(), key.to_string());
         env.insert("CORTADO_SESSION".into(), name.clone());
 
-        let mut command = vec![runtime.binary()];
+        let binary = runtime.binary();
+        if find_executable(&binary).is_none() {
+            let install = match runtime {
+                RuntimeId::Opencode if cfg!(target_os = "macos") => {
+                    "install it with `brew install anomalyco/tap/opencode`"
+                }
+                RuntimeId::Opencode => "install OpenCode from https://opencode.ai/docs",
+                RuntimeId::Codex => "install Codex, or ensure `codex` is on PATH",
+                RuntimeId::Claude => "install Claude Code, or ensure `claude` is on PATH",
+            };
+            anyhow::bail!(
+                "{} runtime executable {binary:?} was not found; {install}, or set CORTADO_BIN_{}",
+                runtime_display(runtime),
+                runtime.as_str().to_uppercase()
+            );
+        }
+        let mut command = vec![binary];
         // Test seam: extra args for substitute binaries (e.g. sleep 30).
         let args_var = format!("CORTADO_{}_ARGS", runtime.as_str().to_uppercase());
         if let Ok(extra) = std::env::var(&args_var) {
@@ -145,6 +162,45 @@ pub fn open_session(
     cortado_term::launcher_for(&config.terminal, config.tmux.socket.clone())
         .open(&session, &format!("{}/{}", entry.team, entry.slug))?;
     Ok(OpenOutcome { session, warnings })
+}
+
+fn runtime_display(runtime: RuntimeId) -> &'static str {
+    match runtime {
+        RuntimeId::Claude => "Claude Code",
+        RuntimeId::Codex => "Codex",
+        RuntimeId::Opencode => "OpenCode",
+    }
+}
+
+/// Resolve without executing the program. Detached tmux can report a
+/// successful spawn before a missing child command exits, so launch must
+/// validate the runtime itself first.
+fn find_executable(binary: &str) -> Option<PathBuf> {
+    let candidate = Path::new(binary);
+    if candidate.components().count() > 1 {
+        return is_executable(candidate).then(|| candidate.to_path_buf());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(binary))
+        .find(|path| is_executable(path))
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn resolve_model_env(model_key: &str, name: &str, value: &str) -> anyhow::Result<(String, String)> {

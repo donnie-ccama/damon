@@ -309,6 +309,15 @@ impl Tmux {
         Ok(())
     }
 
+    /// Bind an unprefixed key in tmux's root table. Mouse events must be
+    /// installed here so they work directly in a pane without `C-b` first.
+    pub fn bind_root_key(&self, key: &str, command: &[&str]) -> Result<(), TmuxError> {
+        let mut args: Vec<String> = vec!["bind-key".into(), "-T".into(), "root".into(), key.into()];
+        args.extend(command.iter().map(|s| s.to_string()));
+        self.run(&args)?;
+        Ok(())
+    }
+
     pub fn select_layout(&self, target: &str, layout: &str) -> Result<(), TmuxError> {
         self.run(&[
             "select-layout".into(),

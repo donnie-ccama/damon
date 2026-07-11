@@ -3,7 +3,7 @@ use crate::tui::app::{Model, RailSel, Tab};
 use crate::tui::popup::{FormFocus, NewAgentForm, Popup, RepoChoice};
 use crate::tui::snapshot::{AgentRow, Snapshot};
 use crate::tui::theme;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
@@ -106,15 +106,50 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
         Span::styled(format!(" {live_count} live"), theme::badge()),
         Span::styled(format!("  ·  {agent_count} agents"), theme::muted()),
     ])));
-    f.render_widget(
-        List::new(items).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(theme::border_focused())
-                .title(Line::styled(" roster ", theme::title())),
-        ),
-        area,
-    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::border_focused())
+        .title(Line::styled(" roster ", theme::title()));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Keep the mark anchored to the bottom without sacrificing roster rows.
+    // On short terminals the roster gets the entire panel and the logo hides.
+    const LOGO_HEIGHT: u16 = 12;
+    let show_logo = inner.height >= items.len() as u16 + LOGO_HEIGHT;
+    if show_logo {
+        let [roster, logo] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(LOGO_HEIGHT)]).areas(inner);
+        f.render_widget(List::new(items), roster);
+        f.render_widget(
+            Paragraph::new(cortado_logo()).alignment(Alignment::Center),
+            logo,
+        );
+    } else {
+        f.render_widget(List::new(items), inner);
+    }
+}
+
+/// Compact terminal-native adaptation of the Cortado night-cafe artwork.
+/// The source image's "TOKYO NIGHT CAFE" subtitle is intentionally omitted.
+fn cortado_logo() -> Vec<Line<'static>> {
+    vec![
+        Line::from(vec![
+            Span::styled("        ·", theme::muted()),
+            Span::styled("     ✦", theme::hint()),
+        ]),
+        Line::styled("        .-~~-.", theme::hint()),
+        Line::styled("     _.'  /\\  `._", theme::hint()),
+        Line::styled("    /  .-'  `-.   \\", theme::model_col()),
+        Line::styled("    \\  `-.@.-'   /", theme::model_col()),
+        Line::styled("     `-._/  \\_.-'", theme::hint()),
+        Line::styled("         (  )", theme::muted()),
+        Line::styled("      .-======-.", theme::brand()),
+        Line::styled("     /::::::::::\\", theme::brand()),
+        Line::styled("     |    /\\    |", theme::brand()),
+        Line::styled("      `--/  \\--'", theme::brand()),
+        Line::styled("      C O R T A D O", theme::brand()),
+    ]
 }
 
 fn selected(item: ListItem<'_>, on: bool) -> ListItem<'_> {
@@ -524,6 +559,34 @@ fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
         RepoChoice::Clone => "url",
         RepoChoice::Worktree => "path",
     };
+    let runtime = Line::from(vec![
+        Span::styled(
+            if form.focus == FormFocus::Runtime {
+                " › runtime  "
+            } else {
+                "   runtime  "
+            },
+            if form.focus == FormFocus::Runtime {
+                theme::key()
+            } else {
+                theme::muted()
+            },
+        ),
+        choice(
+            "Claude",
+            form.runtime == cortado_core::entity::RuntimeId::Claude,
+        ),
+        Span::raw("  "),
+        choice(
+            "Codex",
+            form.runtime == cortado_core::entity::RuntimeId::Codex,
+        ),
+        Span::raw("  "),
+        choice(
+            "OpenCode",
+            form.runtime == cortado_core::entity::RuntimeId::Opencode,
+        ),
+    ]);
     let lines = vec![
         Line::from(vec![
             Span::styled("   team      ", theme::muted()),
@@ -532,11 +595,7 @@ fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
         Line::from(""),
         field("name", &form.name, form.focus == FormFocus::Name),
         field("role", &form.role, form.focus == FormFocus::Role),
-        field(
-            "runtime",
-            form.runtime.as_str(),
-            form.focus == FormFocus::Runtime,
-        ),
+        runtime,
         field("source", source, form.focus == FormFocus::Source),
         field(target_label, &form.target, form.focus == FormFocus::Target),
         field("branch", &form.branch, form.focus == FormFocus::Branch),
@@ -561,6 +620,14 @@ fn render_form(f: &mut Frame, area: Rect, form: &NewAgentForm) {
         ),
         area,
     );
+}
+
+fn choice(label: &str, selected: bool) -> Span<'_> {
+    if selected {
+        Span::styled(format!(" {label} "), theme::selection())
+    } else {
+        Span::styled(label.to_string(), theme::muted())
+    }
 }
 
 fn centered(outer: Rect, w: u16, h: u16) -> Rect {
@@ -632,6 +699,12 @@ mod tests {
         buffer_text(terminal.backend())
     }
 
+    fn rendered_at_height(m: &Model, snap: &Snapshot, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
+        terminal.draw(|f| render(f, m, snap, 1000 + 3723)).unwrap();
+        buffer_text(terminal.backend())
+    }
+
     fn buffer_text(backend: &TestBackend) -> String {
         let buf = backend.buffer();
         let mut out = String::new();
@@ -655,6 +728,25 @@ mod tests {
         assert!(text.contains("Scout"));
         assert!(text.contains("1 live"));
         assert!(text.contains("C O R T A D O"));
+    }
+
+    #[test]
+    fn rail_centers_logo_at_bottom_when_height_allows() {
+        let text = rendered_at_height(&Model::default(), &snap(), 32);
+        assert!(text.contains(".-======-."));
+        assert!(text.contains("C O R T A D O"));
+        assert!(!text.contains("TOKYO NIGHT CAFE"));
+
+        // The coffee cup sits below the roster content, near the panel floor.
+        let roster_row = text
+            .lines()
+            .position(|line| line.contains("1 live"))
+            .unwrap();
+        let logo_row = text
+            .lines()
+            .position(|line| line.contains(".-======-."))
+            .unwrap();
+        assert!(logo_row > roster_row);
     }
 
     #[test]
@@ -882,7 +974,11 @@ mod tests {
         assert!(text.contains("new agent"));
         assert!(text.contains("team      newsletter"));
         assert!(text.contains("› name     Editor")); // Name focused on a fresh form
-        assert!(text.contains("runtime  claude"));
+        assert!(text.contains("runtime   Claude   Codex  OpenCode"));
+        assert!(
+            text.contains("Codex"),
+            "Codex must be visible without cycling"
+        );
         assert!(text.contains("source   new"));
         assert!(text.contains("Tab Next"));
     }

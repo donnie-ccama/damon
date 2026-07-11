@@ -22,13 +22,16 @@ const WORKSPACE_OPTIONS: &[(&str, &str)] = &[
     ("pane-border-status", "top"),
     ("pane-border-style", "fg=#454658"),
     ("pane-active-border-style", "fg=#d79a68"),
+    ("menu-style", "bg=#1a1b26,fg=#c0caf5"),
+    ("menu-selected-style", "bg=#d79a68,fg=#1a1b26,bold"),
+    ("menu-border-style", "fg=#454658"),
     (
         "pane-border-format",
         " #[fg=#78798c]#{?#{@cortado_agent},◇ #{@cortado_agent},roster}#[default] ",
     ),
     (
         "status-right",
-        "#[fg=#a9a1d6]drag#[default] borders · #[fg=#d79a68,bold]C-b H/L#[default] resize ",
+        "#[fg=#a9a1d6]right-click#[default] pane menu · #[fg=#d79a68,bold]C-b H/L#[default] resize ",
     ),
 ];
 
@@ -43,6 +46,18 @@ const RESIZE_BINDINGS: &[(&str, &[&str])] = &[
     ("L", &["resize-pane", "-R", "5"]),
     ("J", &["resize-pane", "-D", "3"]),
     ("K", &["resize-pane", "-U", "3"]),
+];
+
+/// Right-clicking anywhere except the roster opens a Cortado-styled pane menu.
+/// `-t =` makes the pane under the mouse the command target. Layout actions
+/// keep the roster as the main pane; splits intentionally open scratch shells.
+const PANE_MENU_BINDING: &[&str] = &[
+    "if-shell",
+    "-F",
+    "-t",
+    "=",
+    "#{!=:#{@cortado_roster},1}",
+    "display-menu -T '#[fg=#d79a68,bold] CORTADO ' -t = -x M -y M '#{?window_zoomed_flag,Restore pane,Zoom pane}' z 'resize-pane -Z -t =' '' 'Split left / right (shell)' h 'split-window -h -c \"#{pane_current_path}\" -t =' 'Split top / bottom (shell)' v 'split-window -v -c \"#{pane_current_path}\" -t =' '' 'Stack viewers vertically' s 'set-option -w -t = main-pane-width 34 ; select-layout -t = main-vertical' 'Viewers side by side' b 'select-layout -t = even-horizontal ; resize-pane -t \"{top-left}\" -x 34' '' 'Close pane' x 'kill-pane -t ='",
 ];
 
 /// Command a viewer pane runs: a nested tmux client for the agent session.
@@ -71,9 +86,13 @@ pub fn ensure_workspace(tmux: &Tmux, cwd: &Path, rail_command: &[String]) -> any
     // The server is running now (bind-key can't start one). Bindings are
     // server-wide and idempotent: (re)apply every time so upgrades reach
     // already-running servers.
+    if let Some(rail) = tmux.list_panes(WORKSPACE_SESSION)?.first() {
+        tmux.set_pane_option(&rail.id, "@cortado_roster", "1")?;
+    }
     for (key, command) in RESIZE_BINDINGS {
         tmux.bind_key(true, key, command)?;
     }
+    tmux.bind_root_key("MouseDown3Pane", PANE_MENU_BINDING)?;
     Ok(())
 }
 
@@ -180,5 +199,20 @@ mod tests {
             AGENT_SESSION_OPTIONS,
             &[("prefix", "None"), ("status", "off")]
         );
+    }
+
+    #[test]
+    fn pane_menu_is_scoped_to_tagged_agent_panes() {
+        assert_eq!(PANE_MENU_BINDING[0], "if-shell");
+        assert!(PANE_MENU_BINDING.contains(&"#{!=:#{@cortado_roster},1}"));
+        assert!(PANE_MENU_BINDING
+            .iter()
+            .any(|arg| arg.contains("Restore pane,Zoom pane")
+                && arg.contains("Split left / right")
+                && arg.contains("Split top / bottom")
+                && arg.contains("Stack viewers vertically")
+                && arg.contains("Viewers side by side")
+                && arg.contains("Close pane")
+                && arg.contains("kill-pane -t =")));
     }
 }

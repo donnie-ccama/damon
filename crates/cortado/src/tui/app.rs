@@ -614,6 +614,30 @@ mod tests {
     }
 
     #[test]
+    fn new_agent_runtime_cycles_through_all_visible_choices() {
+        let snap = snap_fixture();
+        let mut m = Model::default();
+        update(&mut m, &snap, Event::Tick);
+        update(&mut m, &snap, key(KeyCode::Char('N')));
+        update(&mut m, &snap, key(KeyCode::Tab)); // Role
+        update(&mut m, &snap, key(KeyCode::Tab)); // Runtime
+
+        let runtime = |m: &Model| match &m.popup {
+            Some(crate::tui::popup::Popup::NewAgent(form)) => form.runtime,
+            other => panic!("expected NewAgent popup, got {other:?}"),
+        };
+        assert_eq!(runtime(&m), cortado_core::entity::RuntimeId::Claude);
+        update(&mut m, &snap, key(KeyCode::Right));
+        assert_eq!(runtime(&m), cortado_core::entity::RuntimeId::Codex);
+        update(&mut m, &snap, key(KeyCode::Right));
+        assert_eq!(runtime(&m), cortado_core::entity::RuntimeId::Opencode);
+        update(&mut m, &snap, key(KeyCode::Right));
+        assert_eq!(runtime(&m), cortado_core::entity::RuntimeId::Claude);
+        update(&mut m, &snap, key(KeyCode::Left));
+        assert_eq!(runtime(&m), cortado_core::entity::RuntimeId::Opencode);
+    }
+
+    #[test]
     fn new_agent_form_requires_name_and_clone_url() {
         let snap = snap_fixture();
         let mut m = Model::default();
