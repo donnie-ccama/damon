@@ -14,10 +14,10 @@ case at a time, in Donnie Lane's voice, and never sounds like a tech blog.
 
 | Agent | Role | Reads | Writes |
 |-------|------|-------|--------|
-| **Orchestrator** | Human intake, writes the brief, sequences the pipeline, assembles + publishes | the human's request; then `30-qa.md` | `00-brief.md`, then `40-final.md` |
-| **Researcher** | Truth-and-texture scout (not a citation engine) | `00-brief.md` | `10-research.md` |
-| **Writer** | Drafts the essay, persona rules verbatim | `00-brief.md`, `10-research.md` | `20-draft.md` |
-| **QA** | Runs the Streetlight quality gate; PASS or revision notes | `00`, `10`, `20` | `30-qa.md` |
+| **Orchestrator** | Single-session **producer** — runs the whole article in one session: brief → research → **approval gate** → draft → self-edit → final | the human's request; web pages (accuracy checks only) | `00-brief.md`, `10-research.md`, `20-draft.md`, `40-final.md` |
+| **Researcher** | Truth-and-texture scout (not a citation engine) — optional standalone stage | `00-brief.md` | `10-research.md` |
+| **Writer** | Drafts the essay, persona rules verbatim — optional standalone stage | `00-brief.md`, `10-research.md` | `20-draft.md` |
+| **QA** | **Opt-in** independent Streetlight quality-gate review, run after the fact; PASS or revision notes | `00`, `10`, `20` | `30-qa.md` |
 
 Cortado agents are **isolated peers** — each has its own git worktree and there is no built-in
 "agent A calls agent B." Coordination therefore happens through a **shared, numbered baton** of
@@ -51,13 +51,27 @@ Rules every agent follows:
 ### Runbook (how the human conducts a run)
 
 ```
-cortado open content-creator/Orchestrator   # give it the topic; it writes 00-brief.md
-cortado open content-creator/Researcher      # it reads 00, writes 10-research.md
-cortado open content-creator/Writer          # it reads 00+10, writes 20-draft.md
-cortado open content-creator/QA              # it reads 00+10+20, writes 30-qa.md
-# if QA = REVISE: reopen Writer, then QA again (max 2 loops)
-cortado open content-creator/Orchestrator    # it reads 30-qa.md (PASS), writes 40-final.md
+cortado open content-creator/orchestrator
+#  1) tell it the one AI use case
+#  2) it writes the brief + research, then PAUSES for your approval   <-- the only stop
+#  3) approve -> it drafts, self-edits, and writes 40-final.md in one continuous pass
+#
+# optional, only when you want a formal independent review of the final:
+cortado open content-creator/qa       # writes 30-qa.md: PASS or REVISE + notes
 ```
+
+The **Researcher** and **Writer** agents still exist and can be opened to run
+those stages by hand if you'd rather split the work up.
+
+## About the stop-hook message
+
+At the end of a session Cortado runs `cortado hook reflect`, which intentionally
+**blocks the first stop** to remind the agent to save its memory — it prints a
+"Before finishing…" message and can look like an error. It is **expected, not a
+hang**: the agent does a brief memory write-back and the second stop is allowed
+through. The single-session flow above keeps this to about **once per run**. The
+hook can't be removed because Cortado regenerates the worktree hook on every
+`open`.
 
 ---
 
