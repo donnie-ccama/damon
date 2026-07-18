@@ -2,6 +2,7 @@
 //! Stateless — every question re-asks Herdr; nothing is cached.
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::process::Command;
 
 #[derive(thiserror::Error, Debug)]
 pub enum HerdrError {
@@ -162,7 +163,6 @@ pub fn parse_herdr_version(text: &str) -> Option<(u32, u32)> {
 }
 
 pub struct Herdr {
-    #[allow(dead_code)]
     binary: String,
     workspace_label: String,
     /// Named herdr session (isolated socket) — test seam; None = default session.
@@ -269,6 +269,140 @@ impl Herdr {
         args.push("--".into());
         args.extend(command.iter().cloned());
         args
+    }
+
+    fn run(&self, args: &[String]) -> Result<serde_json::Value, HerdrError> {
+        let out = Command::new(&self.binary).args(args).output().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                HerdrError::NotInstalled
+            } else {
+                HerdrError::Failed {
+                    args: display_args(args),
+                    stderr: e.to_string(),
+                }
+            }
+        })?;
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        if !out.status.success() {
+            // JSON error envelope on stdout beats raw stderr.
+            if let Ok(serde_json::Value::Object(_)) = serde_json::from_str(&stdout) {
+                return match parse_envelope(&stdout) {
+                    Err(e) => Err(e),
+                    Ok(_) => Err(HerdrError::Failed {
+                        args: display_args(args),
+                        stderr,
+                    }),
+                };
+            }
+            // No socket → the server for this session is not running.
+            if stderr.contains("No such file or directory") || stderr.contains("Connection refused") {
+                return Err(HerdrError::ServerDown(stderr));
+            }
+            return Err(HerdrError::Failed { args: display_args(args), stderr });
+        }
+        parse_envelope(&stdout)
+    }
+
+    /// Plain-text commands (`status server`); success text returned as-is.
+    fn run_text(&self, args: &[String]) -> Result<String, HerdrError> {
+        let out = Command::new(&self.binary).args(args).output().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                HerdrError::NotInstalled
+            } else {
+                HerdrError::Failed { args: display_args(args), stderr: e.to_string() }
+            }
+        })?;
+        if !out.status.success() {
+            return Err(HerdrError::ServerDown(
+                String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
+    /// Idempotent: running server → Ok. Down → spawn `herdr server` detached
+    /// and poll until it answers (max ~5s). Mirrors tmux's implicit server start.
+    pub fn ensure_server(&self) -> Result<(), HerdrError> {
+        if matches!(self.run_text(&self.status_args()), Ok(t) if parse_status_running(&t)) {
+            return Ok(());
+        }
+        Command::new(&self.binary)
+            .args(self.server_launch_args())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    HerdrError::NotInstalled
+                } else {
+                    HerdrError::ServerDown(format!("could not launch herdr server: {e}"))
+                }
+            })?;
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if matches!(self.run_text(&self.status_args()), Ok(t) if parse_status_running(&t)) {
+                return Ok(());
+            }
+        }
+        Err(HerdrError::ServerDown(
+            "herdr server did not come up within 5s".into(),
+        ))
+    }
+
+    /// Find the workspace with our label, or create it. Returns workspace_id.
+    pub fn ensure_workspace(&self) -> Result<String, HerdrError> {
+        let list = parse_workspace_list(&self.run(&self.workspace_list_args())?)?;
+        if let Some((id, _)) = list.into_iter().find(|(_, l)| l == &self.workspace_label) {
+            return Ok(id);
+        }
+        parse_workspace_created(&self.run(&self.workspace_create_args())?)
+    }
+
+    pub fn start(
+        &self,
+        name: &str,
+        cwd: &Path,
+        env: &BTreeMap<String, String>,
+        command: &[String],
+        workspace_id: &str,
+        focus: bool,
+    ) -> Result<AgentInfo, HerdrError> {
+        parse_started_agent(&self.run(&self.start_args(name, cwd, env, command, workspace_id, focus))?)
+    }
+
+    pub fn list(&self) -> Result<Vec<AgentInfo>, HerdrError> {
+        parse_agent_list(&self.run(&self.list_args())?)
+    }
+
+    pub fn focus(&self, name: &str) -> Result<(), HerdrError> {
+        self.run(&self.focus_args(name)).map(|_| ())
+    }
+
+    pub fn close(&self, pane_id: &str) -> Result<(), HerdrError> {
+        self.run(&self.close_args(pane_id)).map(|_| ())
+    }
+
+    pub fn send(&self, name: &str, text: &str) -> Result<(), HerdrError> {
+        self.run(&self.send_args(name, text)).map(|_| ())
+    }
+
+    pub fn read(&self, name: &str, lines: u32) -> Result<String, HerdrError> {
+        let result = self.run(&self.read_args(name, lines))?;
+        // Live-verified shape (herdr 0.7.4): `agent read` result is
+        // `{"read": {"text": "...", ...}, "type": "pane_read"}` — the text is
+        // nested under "read", not at the top level. Fall back to the raw
+        // JSON if the shape ever changes, for the caller to interpret.
+        Ok(result["read"]
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| result.to_string()))
+    }
+
+    pub fn wait_status(&self, name: &str, status: &str, timeout_ms: u64) -> Result<(), HerdrError> {
+        self.run(&self.wait_status_args(name, status, timeout_ms)).map(|_| ())
     }
 }
 
