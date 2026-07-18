@@ -28,6 +28,7 @@ impl Default for General {
     }
 }
 
+/// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct TmuxCfg {
@@ -42,6 +43,7 @@ impl Default for TmuxCfg {
     }
 }
 
+/// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct TerminalCfg {
@@ -175,6 +177,9 @@ mod tests {
         let c = Config::default();
         assert_eq!(c.general.root, "~/cortado");
         assert_eq!(c.general.default_runtime, "claude");
+        assert_eq!(c.tmux.socket, "cortado");
+        assert_eq!(c.terminal.launcher, Launcher::Workspace);
+        assert_eq!(c.terminal.window, Window::Ghostty);
         assert_eq!(c.herdr.binary, "herdr");
         assert_eq!(c.herdr.workspace, "Cortado");
     }
