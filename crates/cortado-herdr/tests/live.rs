@@ -109,3 +109,14 @@ fn missing_binary_is_not_installed() {
         other => panic!("expected NotInstalled, got {other:?}"),
     }
 }
+
+#[test]
+fn ensure_server_timeout_reaps_child_and_errors() {
+    // `false server` exits immediately; status polls fail; after ~5s we must
+    // get ServerDown, not a hang or a leaked child.
+    let h = Herdr::new("false".into(), "Cortado".into(), None);
+    match h.ensure_server() {
+        Err(cortado_herdr::HerdrError::ServerDown(_)) => {}
+        other => panic!("expected ServerDown, got {other:?}"),
+    }
+}

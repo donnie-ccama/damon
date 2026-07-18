@@ -72,6 +72,25 @@ pub fn display_args(args: &[String]) -> String {
     out.join(" ")
 }
 
+/// Mask known `--env K=V` values if they appear in arbitrary process output.
+/// Only values >= 8 bytes are masked: real secrets are long, and masking
+/// short values (team names, slugs) would mangle unrelated error text.
+fn redact_values(args: &[String], text: &str) -> String {
+    let mut out = text.to_string();
+    let mut prev_was_env = false;
+    for a in args {
+        if prev_was_env {
+            if let Some((_, v)) = a.split_once('=') {
+                if v.len() >= 8 {
+                    out = out.replace(v, "***");
+                }
+            }
+        }
+        prev_was_env = a == "--env";
+    }
+    out
+}
+
 /// Unwrap the one-line JSON envelope: `{"result": {...}}` or `{"error": {...}}`.
 pub fn parse_envelope(stdout: &str) -> Result<serde_json::Value, HerdrError> {
     let v: serde_json::Value = serde_json::from_str(stdout.trim())
@@ -284,6 +303,7 @@ impl Herdr {
         })?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stderr = redact_values(args, &stderr);
         if !out.status.success() {
             // JSON error envelope on stdout beats raw stderr.
             if let Ok(serde_json::Value::Object(_)) = serde_json::from_str(&stdout) {
@@ -314,9 +334,9 @@ impl Herdr {
             }
         })?;
         if !out.status.success() {
-            return Err(HerdrError::ServerDown(
-                String::from_utf8_lossy(&out.stderr).trim().to_string(),
-            ));
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stderr = redact_values(args, &stderr);
+            return Err(HerdrError::ServerDown(stderr));
         }
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     }
@@ -327,7 +347,7 @@ impl Herdr {
         if matches!(self.run_text(&self.status_args()), Ok(t) if parse_status_running(&t)) {
             return Ok(());
         }
-        Command::new(&self.binary)
+        let mut child = Command::new(&self.binary)
             .args(self.server_launch_args())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -343,9 +363,13 @@ impl Herdr {
         for _ in 0..50 {
             std::thread::sleep(std::time::Duration::from_millis(100));
             if matches!(self.run_text(&self.status_args()), Ok(t) if parse_status_running(&t)) {
+                // Server is running; deliberately do NOT kill or wait — the server must outlive us.
                 return Ok(());
             }
         }
+        // Startup timed out; reap the child to avoid leaving orphaned processes.
+        child.kill().ok();
+        child.wait().ok();
         Err(HerdrError::ServerDown(
             "herdr server did not come up within 5s".into(),
         ))
@@ -555,5 +579,20 @@ mod tests {
             Err(HerdrError::Parse(msg)) => assert!(msg.len() < garbage.len()),
             other => panic!("expected Parse error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stderr_redaction_masks_long_env_values_only() {
+        let args: Vec<String> = vec![
+            "agent".into(), "start".into(), "x".into(),
+            "--env".into(), "OPENROUTER_API_KEY=sk-verylongsecret123".into(),
+            "--env".into(), "CORTADO_TEAM=demo".into(),
+        ];
+        let text = "bad invocation: --env OPENROUTER_API_KEY=sk-verylongsecret123 in cortado_demo_scout_1";
+        let red = redact_values(&args, text);
+        assert!(!red.contains("sk-verylongsecret123"));
+        assert!(red.contains("OPENROUTER_API_KEY=***"));
+        // short value "demo" untouched — session name not mangled
+        assert!(red.contains("cortado_demo_scout_1"));
     }
 }
