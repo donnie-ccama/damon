@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 #[serde(default)]
 pub struct Config {
     pub general: General,
+    /// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
     pub tmux: TmuxCfg,
+    /// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
     pub terminal: TerminalCfg,
+    pub herdr: HerdrCfg,
 }
 
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -73,6 +76,21 @@ pub enum Window {
     Print,
 }
 
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct HerdrCfg {
+    /// Path or name of the herdr binary.
+    pub binary: String,
+    /// Label of the Herdr workspace cortado owns.
+    pub workspace: String,
+}
+
+impl Default for HerdrCfg {
+    fn default() -> Self {
+        HerdrCfg { binary: "herdr".into(), workspace: "Cortado".into() }
+    }
+}
+
 fn home_dir() -> Result<PathBuf, CoreError> {
     dirs::home_dir().ok_or(CoreError::NoHome)
 }
@@ -117,6 +135,19 @@ impl Config {
     pub fn default_toml() -> String {
         toml::to_string_pretty(&Config::default()).expect("serialize default config")
     }
+
+    /// Test seam: target a named herdr session (isolated socket).
+    pub fn herdr_session() -> Option<String> {
+        std::env::var("CORTADO_HERDR_SESSION").ok().filter(|s| !s.is_empty())
+    }
+}
+
+/// Retired config sections present in the file at `path` (best-effort:
+/// unreadable/invalid files report nothing — load() owns real errors).
+pub fn obsolete_sections(path: &Path) -> Vec<&'static str> {
+    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    let Ok(v) = text.parse::<toml::Table>() else { return Vec::new() };
+    ["tmux", "terminal"].into_iter().filter(|s| v.contains_key(*s)).collect()
 }
 
 pub(crate) fn load_toml_or_default<T: serde::de::DeserializeOwned + Default>(
@@ -144,9 +175,8 @@ mod tests {
         let c = Config::default();
         assert_eq!(c.general.root, "~/cortado");
         assert_eq!(c.general.default_runtime, "claude");
-        assert_eq!(c.tmux.socket, "cortado");
-        assert_eq!(c.terminal.launcher, Launcher::Workspace);
-        assert_eq!(c.terminal.window, Window::Ghostty);
+        assert_eq!(c.herdr.binary, "herdr");
+        assert_eq!(c.herdr.workspace, "Cortado");
     }
 
     #[test]
@@ -159,6 +189,27 @@ mod tests {
         let c: Config = toml::from_str("[terminal]\nlauncher = \"ghostty\"\n").unwrap();
         assert_eq!(c.terminal.launcher, Launcher::Ghostty);
         assert_eq!(c.terminal.window, Window::Ghostty);
+    }
+
+    #[test]
+    fn herdr_section_parses_and_fills_defaults() {
+        let c: Config = toml::from_str("[herdr]\nbinary = \"/opt/herdr\"\n").unwrap();
+        assert_eq!(c.herdr.binary, "/opt/herdr");
+        assert_eq!(c.herdr.workspace, "Cortado");
+    }
+
+    #[test]
+    fn old_tmux_terminal_sections_still_parse_but_are_reported() {
+        // Old config files must keep loading (serde ignores unknown sections)…
+        let text = "[tmux]\nsocket = \"cortado\"\n[terminal]\nlauncher = \"workspace\"\n";
+        let c: Config = toml::from_str(text).unwrap();
+        assert_eq!(c, Config::default());
+        // …and obsolete_sections names what should be deleted.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(obsolete_sections(&path), vec!["tmux", "terminal"]);
+        assert!(obsolete_sections(&tmp.path().join("missing.toml")).is_empty());
     }
 
     #[test]
