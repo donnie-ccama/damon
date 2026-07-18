@@ -70,10 +70,21 @@ fn bootstrap_workspace(config: &Config) -> anyhow::Result<()> {
 
 fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow::Result<()> {
     let mut model = Model::default();
+    let mut logo = view::LogoState::new();
     let mut world = load_world(config);
     loop {
+        // The workspace process can start detached and survive several
+        // terminal windows. Refresh between event reads so a newly attached
+        // client supplies the right cell metrics for the logo.
+        logo.refresh();
         terminal.draw(|f| match &world {
-            Ok(snap) => view::render(f, &model, snap, chrono::Utc::now().timestamp()),
+            Ok(snap) => view::render_with_logo(
+                f,
+                &model,
+                snap,
+                chrono::Utc::now().timestamp(),
+                logo.image_mut(),
+            ),
             Err(msg) => view::render_error(f, msg),
         })?;
         let ev = event::next(Duration::from_secs(2))?;
@@ -86,6 +97,10 @@ fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow
                             let result = suspend(&mut terminal, || {
                                 crate::commands::memory::spawn_editor(&path)
                             });
+                            // A direct terminal may discard graphics when the
+                            // alternate screen changes; tmux clients may also
+                            // have changed while the editor was open.
+                            logo.invalidate();
                             let status = match result {
                                 Ok(Ok(s)) if s.success() => {
                                     // File may have changed; refresh the open

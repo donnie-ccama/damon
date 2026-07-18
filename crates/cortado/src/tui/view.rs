@@ -3,20 +3,209 @@ use crate::tui::app::{Model, RailSel, Tab};
 use crate::tui::popup::{FormFocus, NewAgentForm, Popup, RepoChoice};
 use crate::tui::snapshot::{AgentRow, Snapshot};
 use crate::tui::theme;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
 };
 use ratatui::Frame;
+use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::{Resize, StatefulImage};
 
+const LOGO_PNG: &[u8] = include_bytes!("../../assets/cortado-logo.png");
+const LOGO_SCALE_PERCENT: u16 = 50;
+const LOGO_BACKGROUND: image::Rgba<u8> = image::Rgba([0x29, 0x2c, 0x33, 0xff]);
+const TMUX_CLIENT_FORMAT: &str = concat!(
+    "#{client_pid}|#{client_created}|#{client_tty}|",
+    "#{client_width}|#{client_height}|",
+    "#{client_cell_width}|#{client_cell_height}|#{client_termname}"
+);
+
+pub struct LogoImage {
+    protocol: StatefulProtocol,
+}
+
+/// Owns the terminal-specific image state. The tmux workspace starts detached,
+/// so the logo is initialized only after a real client supplies its cell
+/// metrics. A changed client signature rebuilds it at the new size.
+pub struct LogoState {
+    image: Option<LogoImage>,
+    tmux_client_signature: Option<String>,
+    direct_terminal_probed: bool,
+}
+
+impl LogoState {
+    pub fn new() -> Self {
+        let mut state = Self {
+            image: None,
+            tmux_client_signature: None,
+            direct_terminal_probed: false,
+        };
+        state.refresh();
+        state
+    }
+
+    /// Retry after detached startup and rebuild after a client reconnects.
+    /// Call only between event reads; terminal capability queries consume
+    /// stdin briefly.
+    pub fn refresh(&mut self) {
+        if std::env::var_os("TMUX_PANE").is_some() {
+            let Some(client) = current_tmux_client() else {
+                // The workspace starts detached, before Ghostty opens. Do not
+                // query stdio until a real client is present to answer.
+                self.image = None;
+                self.tmux_client_signature = None;
+                return;
+            };
+            if self.tmux_client_signature.as_deref() == Some(client.signature.as_str()) {
+                return;
+            }
+            self.image = load_logo(Some(&client));
+            self.tmux_client_signature = Some(client.signature);
+        } else if !self.direct_terminal_probed {
+            self.image = load_logo(None);
+            self.direct_terminal_probed = true;
+        }
+    }
+
+    pub fn image_mut(&mut self) -> Option<&mut LogoImage> {
+        self.image.as_mut()
+    }
+
+    pub fn invalidate(&mut self) {
+        self.image = None;
+        self.tmux_client_signature = None;
+        self.direct_terminal_probed = false;
+    }
+}
+
+struct TmuxClient {
+    signature: String,
+    font_size: Option<(u16, u16)>,
+    is_ghostty: bool,
+}
+
+fn current_tmux_client() -> Option<TmuxClient> {
+    let pane = std::env::var_os("TMUX_PANE")?;
+    let output = std::process::Command::new("tmux")
+        .args([
+            "list-clients",
+            "-t",
+            pane.to_str()?,
+            "-F",
+            TMUX_CLIENT_FORMAT,
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_tmux_clients(&String::from_utf8(output.stdout).ok()?)
+}
+
+fn parse_tmux_clients(text: &str) -> Option<TmuxClient> {
+    let mut lines: Vec<&str> = text.lines().filter(|line| !line.is_empty()).collect();
+    lines.sort_unstable();
+    let signature = lines.join("\n");
+
+    // Prefer the Ghostty client Cortado opened. If multiple clients view the
+    // session, their complete sorted list remains in the signature so any
+    // attach, detach, resize, or font-metric change triggers retransmission.
+    let parsed: Vec<(Option<(u16, u16)>, bool)> = lines
+        .iter()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split('|').collect();
+            let term = fields.get(7)?.to_ascii_lowercase();
+            let width = fields.get(5)?.parse::<u16>().ok();
+            let height = fields.get(6)?.parse::<u16>().ok();
+            let font_size = match (width, height) {
+                (Some(width), Some(height)) if width > 0 && height > 0 => Some((width, height)),
+                _ => None,
+            };
+            Some((font_size, term.contains("ghostty")))
+        })
+        .collect();
+    let (font_size, is_ghostty) = parsed
+        .iter()
+        .find(|(_, is_ghostty)| *is_ghostty)
+        .or_else(|| parsed.first())?;
+
+    Some(TmuxClient {
+        signature,
+        font_size: *font_size,
+        is_ghostty: *is_ghostty,
+    })
+}
+
+fn terminal_font_size() -> Option<(u16, u16)> {
+    let size = ratatui::crossterm::terminal::window_size().ok()?;
+    if size.columns == 0 || size.rows == 0 || size.width == 0 || size.height == 0 {
+        return None;
+    }
+    Some((
+        size.width.div_ceil(size.columns),
+        size.height.div_ceil(size.rows),
+    ))
+}
+
+fn env_is_ghostty() -> bool {
+    std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some()
+        || std::env::var("TERM").is_ok_and(|term| term.to_ascii_lowercase().contains("ghostty"))
+        || std::env::var("TERM_PROGRAM")
+            .is_ok_and(|term| term.to_ascii_lowercase().contains("ghostty"))
+}
+
+/// Initialize a raster protocol for the terminal currently attached to the
+/// workspace. Inside tmux, render with true-color half blocks: ratatui-image
+/// 8.x sends Kitty bitmap chunks in one oversized passthrough sequence, which
+/// tmux drops while leaving invisible placement markers behind. Half blocks
+/// preserve the same artwork and palette without terminal-specific payloads.
+fn load_logo(client: Option<&TmuxClient>) -> Option<LogoImage> {
+    let is_ghostty = client.map_or_else(env_is_ghostty, |client| client.is_ghostty);
+    let font_size = client
+        .and_then(|client| client.font_size)
+        .or_else(terminal_font_size);
+    let mut picker = if let Some(font_size) = font_size {
+        Picker::from_fontsize(font_size)
+    } else if is_ghostty {
+        Picker::from_fontsize((10, 20))
+    } else {
+        Picker::from_query_stdio().ok()?
+    };
+    if client.is_some() {
+        picker.set_protocol_type(ProtocolType::Halfblocks);
+    } else if picker.protocol_type() != ProtocolType::Kitty && is_ghostty {
+        picker.set_protocol_type(ProtocolType::Kitty);
+    }
+    // ratatui-image pads aspect-ratio rounding before converting to terminal
+    // half blocks. Make those pixels match the roster canvas instead of the
+    // library's transparent-black default, which rendered as a black bar.
+    picker.set_background_color(LOGO_BACKGROUND);
+    let image = image::load_from_memory_with_format(LOGO_PNG, image::ImageFormat::Png).ok()?;
+    Some(LogoImage {
+        protocol: picker.new_resize_protocol(image),
+    })
+}
+
+#[cfg(test)]
 pub fn render(f: &mut Frame, m: &Model, snap: &Snapshot, now_unix: i64) {
+    render_with_logo(f, m, snap, now_unix, None);
+}
+
+pub fn render_with_logo(
+    f: &mut Frame,
+    m: &Model,
+    snap: &Snapshot,
+    now_unix: i64,
+    logo: Option<&mut LogoImage>,
+) {
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
     let rail_width = if f.area().width >= 100 { 34 } else { 30 };
     let [rail, right] =
         Layout::horizontal([Constraint::Length(rail_width), Constraint::Min(0)]).areas(main);
-    render_rail(f, rail, m, snap);
+    render_rail(f, rail, m, snap, logo);
     render_right(f, right, m, snap, now_unix);
     render_status(f, status, m);
     if let Some(p) = &m.popup {
@@ -37,7 +226,13 @@ pub fn render_error(f: &mut Frame, msg: &str) {
     );
 }
 
-fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
+fn render_rail(
+    f: &mut Frame,
+    area: Rect,
+    m: &Model,
+    snap: &Snapshot,
+    logo: Option<&mut LogoImage>,
+) {
     let mut items: Vec<ListItem> = Vec::new();
     items.push(ListItem::new(Line::styled(
         " C O R T A D O",
@@ -114,42 +309,65 @@ fn render_rail(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
     f.render_widget(block, area);
 
     // Keep the mark anchored to the bottom without sacrificing roster rows.
-    // On short terminals the roster gets the entire panel and the logo hides.
-    const LOGO_HEIGHT: u16 = 12;
-    let show_logo = inner.height >= items.len() as u16 + LOGO_HEIGHT;
-    if show_logo {
-        let [roster, logo] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(LOGO_HEIGHT)]).areas(inner);
+    // Shrink it on shorter terminals, hiding it only when fewer than ten rows
+    // remain after the complete roster.
+    let logo_height = logo
+        .is_some()
+        .then(|| available_logo_height(inner.height, items.len()))
+        .flatten();
+    if let Some(logo_height) = logo_height {
+        let [roster, logo_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(logo_height)]).areas(inner);
         f.render_widget(List::new(items), roster);
-        f.render_widget(
-            Paragraph::new(cortado_logo()).alignment(Alignment::Center),
-            logo,
-        );
+        if let Some(logo) = logo {
+            // Fit at full size first, then render at 50% of those dimensions
+            // and anchor the smaller rectangle to the pane's bottom-right.
+            let padded = Rect::new(
+                logo_area.x + 1,
+                logo_area.y,
+                logo_area.width.saturating_sub(2),
+                logo_area.height,
+            );
+            let full_size = logo.protocol.size_for(Resize::Fit(None), padded);
+            let scaled_bounds = scale_logo_rect(full_size);
+            let scaled_size = logo.protocol.size_for(Resize::Fit(None), scaled_bounds);
+            let bottom_right = bottom_right_rect(padded, scaled_size);
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                bottom_right,
+                &mut logo.protocol,
+            );
+        }
     } else {
         f.render_widget(List::new(items), inner);
     }
 }
 
-/// Compact terminal-native adaptation of the Cortado night-cafe artwork.
-/// The source image's "TOKYO NIGHT CAFE" subtitle is intentionally omitted.
-fn cortado_logo() -> Vec<Line<'static>> {
-    vec![
-        Line::from(vec![
-            Span::styled("        ·", theme::muted()),
-            Span::styled("     ✦", theme::hint()),
-        ]),
-        Line::styled("        .-~~-.", theme::hint()),
-        Line::styled("     _.'  /\\  `._", theme::hint()),
-        Line::styled("    /  .-'  `-.   \\", theme::model_col()),
-        Line::styled("    \\  `-.@.-'   /", theme::model_col()),
-        Line::styled("     `-._/  \\_.-'", theme::hint()),
-        Line::styled("         (  )", theme::muted()),
-        Line::styled("      .-======-.", theme::brand()),
-        Line::styled("     /::::::::::\\", theme::brand()),
-        Line::styled("     |    /\\    |", theme::brand()),
-        Line::styled("      `--/  \\--'", theme::brand()),
-        Line::styled("      C O R T A D O", theme::brand()),
-    ]
+fn scale_logo_rect(rect: Rect) -> Rect {
+    let scale = |value: u16| {
+        let scaled = (u32::from(value) * u32::from(LOGO_SCALE_PERCENT) + 50) / 100;
+        u16::try_from(scaled).unwrap_or(u16::MAX).max(1)
+    };
+    Rect::new(0, 0, scale(rect.width), scale(rect.height))
+}
+
+fn bottom_right_rect(container: Rect, size: Rect) -> Rect {
+    let width = size.width.min(container.width);
+    let height = size.height.min(container.height);
+    Rect::new(
+        container.x + container.width.saturating_sub(width),
+        container.y + container.height.saturating_sub(height),
+        width,
+        height,
+    )
+}
+
+fn available_logo_height(inner_height: u16, item_count: usize) -> Option<u16> {
+    const MIN_LOGO_HEIGHT: u16 = 10;
+    const MAX_LOGO_HEIGHT: u16 = 20;
+    let item_count = u16::try_from(item_count).unwrap_or(u16::MAX);
+    let height = inner_height.saturating_sub(item_count).min(MAX_LOGO_HEIGHT);
+    (height >= MIN_LOGO_HEIGHT).then_some(height)
 }
 
 fn selected(item: ListItem<'_>, on: bool) -> ListItem<'_> {
@@ -699,12 +917,6 @@ mod tests {
         buffer_text(terminal.backend())
     }
 
-    fn rendered_at_height(m: &Model, snap: &Snapshot, height: u16) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
-        terminal.draw(|f| render(f, m, snap, 1000 + 3723)).unwrap();
-        buffer_text(terminal.backend())
-    }
-
     fn buffer_text(backend: &TestBackend) -> String {
         let buf = backend.buffer();
         let mut out = String::new();
@@ -718,6 +930,42 @@ mod tests {
     }
 
     #[test]
+    fn tmux_client_parser_prefers_ghostty_and_tracks_every_client() {
+        let clients = concat!(
+            "55|2000|/dev/ttys005|215|61|16|34|xterm-ghostty\n",
+            "44|1000|/dev/ttys004|120|40|9|18|xterm-256color\n"
+        );
+        let client = parse_tmux_clients(clients).unwrap();
+
+        assert!(client.is_ghostty);
+        assert_eq!(client.font_size, Some((16, 34)));
+        assert!(client.signature.starts_with("44|1000"));
+        assert!(client.signature.contains("\n55|2000"));
+    }
+
+    #[test]
+    fn tmux_client_parser_waits_when_workspace_is_detached() {
+        assert!(parse_tmux_clients("").is_none());
+    }
+
+    #[test]
+    fn logo_shrinks_before_it_hides() {
+        assert_eq!(available_logo_height(56, 23), Some(20));
+        assert_eq!(available_logo_height(37, 23), Some(14));
+        assert_eq!(available_logo_height(32, 23), None);
+    }
+
+    #[test]
+    fn logo_is_scaled_to_fifty_percent_and_bottom_right_aligned() {
+        let scaled = scale_logo_rect(Rect::new(0, 0, 30, 19));
+        assert_eq!(scaled, Rect::new(0, 0, 15, 10));
+        assert_eq!(
+            bottom_right_rect(Rect::new(10, 20, 30, 20), scaled),
+            Rect::new(25, 30, 15, 10)
+        );
+    }
+
+    #[test]
     fn rail_shows_team_agent_and_badge() {
         let m = Model {
             sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
@@ -728,25 +976,6 @@ mod tests {
         assert!(text.contains("Scout"));
         assert!(text.contains("1 live"));
         assert!(text.contains("C O R T A D O"));
-    }
-
-    #[test]
-    fn rail_centers_logo_at_bottom_when_height_allows() {
-        let text = rendered_at_height(&Model::default(), &snap(), 32);
-        assert!(text.contains(".-======-."));
-        assert!(text.contains("C O R T A D O"));
-        assert!(!text.contains("TOKYO NIGHT CAFE"));
-
-        // The coffee cup sits below the roster content, near the panel floor.
-        let roster_row = text
-            .lines()
-            .position(|line| line.contains("1 live"))
-            .unwrap();
-        let logo_row = text
-            .lines()
-            .position(|line| line.contains(".-======-."))
-            .unwrap();
-        assert!(logo_row > roster_row);
     }
 
     #[test]

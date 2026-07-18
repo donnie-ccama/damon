@@ -48,16 +48,41 @@ const RESIZE_BINDINGS: &[(&str, &[&str])] = &[
     ("K", &["resize-pane", "-U", "3"]),
 ];
 
-/// Right-clicking anywhere except the roster opens a Cortado-styled pane menu.
+/// Right-clicking any workspace pane opens a Cortado-styled pane menu.
 /// `-t =` makes the pane under the mouse the command target. Layout actions
 /// keep the roster as the main pane; splits intentionally open scratch shells.
+/// Closing the roster is disabled so the workspace cannot lose its controller.
 const PANE_MENU_BINDING: &[&str] = &[
-    "if-shell",
-    "-F",
+    "display-menu",
+    "-T",
+    "#[fg=#d79a68,bold] CORTADO ",
     "-t",
     "=",
-    "#{!=:#{@cortado_roster},1}",
-    "display-menu -T '#[fg=#d79a68,bold] CORTADO ' -t = -x M -y M '#{?window_zoomed_flag,Restore pane,Zoom pane}' z 'resize-pane -Z -t =' '' 'Split left / right (shell)' h 'split-window -h -c \"#{pane_current_path}\" -t =' 'Split top / bottom (shell)' v 'split-window -v -c \"#{pane_current_path}\" -t =' '' 'Stack viewers vertically' s 'set-option -w -t = main-pane-width 34 ; select-layout -t = main-vertical' 'Viewers side by side' b 'select-layout -t = even-horizontal ; resize-pane -t \"{top-left}\" -x 34' '' 'Close pane' x 'kill-pane -t ='",
+    "-x",
+    "M",
+    "-y",
+    "M",
+    "#{?window_zoomed_flag,Restore pane,Zoom pane}",
+    "z",
+    "resize-pane -Z -t =",
+    "",
+    "Split left / right (shell)",
+    "h",
+    "split-window -h -c \"#{pane_current_path}\" -t =",
+    "Split top / bottom (shell)",
+    "v",
+    "split-window -v -c \"#{pane_current_path}\" -t =",
+    "",
+    "Stack viewers vertically",
+    "s",
+    "set-option -w -t = main-pane-width 34 ; select-layout -t = main-vertical",
+    "Viewers side by side",
+    "b",
+    "select-layout -t = even-horizontal ; resize-pane -t \"{top-left}\" -x 34",
+    "",
+    "#{?#{@cortado_roster},-Close pane,Close pane}",
+    "x",
+    "kill-pane -t =",
 ];
 
 /// Command a viewer pane runs: a nested tmux client for the agent session.
@@ -202,17 +227,16 @@ mod tests {
     }
 
     #[test]
-    fn pane_menu_is_scoped_to_tagged_agent_panes() {
-        assert_eq!(PANE_MENU_BINDING[0], "if-shell");
-        assert!(PANE_MENU_BINDING.contains(&"#{!=:#{@cortado_roster},1}"));
+    fn pane_menu_is_available_everywhere_but_cannot_close_roster() {
+        assert_eq!(PANE_MENU_BINDING[0], "display-menu");
         assert!(PANE_MENU_BINDING
             .iter()
-            .any(|arg| arg.contains("Restore pane,Zoom pane")
-                && arg.contains("Split left / right")
-                && arg.contains("Split top / bottom")
-                && arg.contains("Stack viewers vertically")
-                && arg.contains("Viewers side by side")
-                && arg.contains("Close pane")
-                && arg.contains("kill-pane -t =")));
+            .any(|arg| arg.contains("Restore pane,Zoom pane") && arg.contains("Zoom pane")));
+        assert!(PANE_MENU_BINDING.contains(&"Split left / right (shell)"));
+        assert!(PANE_MENU_BINDING.contains(&"Split top / bottom (shell)"));
+        assert!(PANE_MENU_BINDING.contains(&"Stack viewers vertically"));
+        assert!(PANE_MENU_BINDING.contains(&"Viewers side by side"));
+        assert!(PANE_MENU_BINDING.contains(&"#{?#{@cortado_roster},-Close pane,Close pane}"));
+        assert!(PANE_MENU_BINDING.contains(&"kill-pane -t ="));
     }
 }
