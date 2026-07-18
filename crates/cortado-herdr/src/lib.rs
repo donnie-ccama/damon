@@ -89,7 +89,14 @@ pub fn parse_envelope(stdout: &str) -> Result<serde_json::Value, HerdrError> {
 
 fn truncate(s: &str) -> String {
     let s = s.trim();
-    if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() }
+    if s.len() <= 200 {
+        return s.to_string();
+    }
+    let mut end = 200;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
 }
 
 fn agent_from_value(a: &serde_json::Value) -> Option<AgentInfo> {
@@ -404,5 +411,15 @@ mod tests {
         ]);
         assert!(shown.contains("OPENROUTER_API_KEY=***"));
         assert!(!shown.contains("sk-secret"));
+    }
+
+    #[test]
+    fn envelope_parse_error_truncates_on_char_boundary_without_panic() {
+        // 300 3-byte chars (€): byte 200 is guaranteed mid-character.
+        let garbage = "€".repeat(300);
+        match parse_envelope(&garbage) {
+            Err(HerdrError::Parse(msg)) => assert!(msg.len() < garbage.len()),
+            other => panic!("expected Parse error, got {other:?}"),
+        }
     }
 }
