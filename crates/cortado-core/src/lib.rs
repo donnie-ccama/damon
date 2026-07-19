@@ -5,6 +5,7 @@ pub mod config;
 pub mod entity;
 pub mod memory;
 pub mod models;
+pub mod session_log;
 pub mod session_name;
 pub mod slug;
 pub mod store;
