@@ -4,7 +4,7 @@ use cortado_core::entity::RuntimeId;
 use cortado_core::models::ModelsFile;
 use cortado_core::session_name::SessionName;
 use cortado_core::store::Store;
-use cortado_tmux::Tmux;
+use cortado_herdr::Herdr;
 use keyring::Entry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -24,12 +24,26 @@ pub struct OpenOutcome {
 }
 
 pub fn run(reference: &str, model_key: Option<&str>, new: bool) -> anyhow::Result<()> {
+    warn_obsolete_config();
     let out = open_session(reference, model_key, new)?;
     for w in &out.warnings {
         eprintln!("warning: {w}");
     }
     println!("session {}", out.session);
     Ok(())
+}
+
+/// One-line nudge when the config file still has retired sections.
+pub fn warn_obsolete_config() {
+    if let Ok(dir) = Config::config_dir() {
+        let stale = cortado_core::config::obsolete_sections(&dir.join("config.toml"));
+        if !stale.is_empty() {
+            eprintln!(
+                "note: config sections [{}] are obsolete since the Herdr substrate swap — remove them from config.toml",
+                stale.join("], [")
+            );
+        }
+    }
 }
 
 pub fn open_session(
@@ -58,20 +72,28 @@ pub fn open_session(
         other => anyhow::bail!("unknown runtime {other:?} in models.toml"),
     };
 
-    let tmux = Tmux::new(config.tmux.socket.clone());
-    let live = tmux.list()?;
-    let mine: Vec<&String> = live
+    let herdr = Herdr::new(
+        config.herdr.binary.clone(),
+        config.herdr.workspace.clone(),
+        Config::herdr_session(),
+    );
+    herdr.ensure_server()?;
+    let live = herdr.list()?;
+    let mine: Vec<&cortado_herdr::AgentInfo> = live
         .iter()
-        .filter(|s| {
-            SessionName::parse(s).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+        .filter(|a| {
+            SessionName::parse(&a.name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         })
         .collect();
 
     let session = if !fresh && !mine.is_empty() {
-        mine.iter()
-            .max_by_key(|s| SessionName::parse(s).map(|n| n.n).unwrap_or(0))
-            .unwrap()
-            .to_string() // most recent = highest n (numeric, not lexical)
+        // most recent = highest n (numeric, not lexical)
+        let best = mine
+            .iter()
+            .max_by_key(|a| SessionName::parse(&a.name).map(|n| n.n).unwrap_or(0))
+            .unwrap();
+        herdr.focus(&best.name)?;
+        best.name.clone()
     } else {
         // Regenerate bridges from canonical memory before every spawn.
         let worktree = store.worktree_dir(&entry.team, &entry.slug);
@@ -90,7 +112,8 @@ pub fn open_session(
             &names.iter().map(String::as_str).collect::<Vec<_>>(),
         )?;
 
-        let name = SessionName::next_free(&entry.team, &entry.slug, &live).encode();
+        let live_names: Vec<String> = live.iter().map(|a| a.name.clone()).collect();
+        let name = SessionName::next_free(&entry.team, &entry.slug, &live_names).encode();
         let mut env: BTreeMap<String, String> = model
             .env
             .iter()
@@ -123,26 +146,21 @@ pub fn open_session(
         if let Ok(extra) = std::env::var(&args_var) {
             command.extend(extra.split_whitespace().map(String::from));
         }
-        if let Err(e) = tmux.spawn(&name, &worktree, &env, &command) {
-            tmux.kill(&name).ok(); // clean up any half-created session
-            return Err(e.into());
-        }
-        // Surface the model in `list-sessions -F` so the TUI reads all models
-        // in one call instead of one show-environment per session.
-        if let Err(e) = tmux.set_option(&name, "@cortado_model", key) {
-            warnings.push(format!(
-                "could not tag session model ({e}); it will render as ?"
-            ));
-        }
-        // Workspace mode: the outer workspace tmux owns all keys and draws
-        // the only status bar; the agent session must not compete.
-        if config.terminal.launcher == cortado_core::config::Launcher::Workspace {
-            if let Err(e) =
-                tmux.set_session_options(&name, cortado_term::workspace::AGENT_SESSION_OPTIONS)
-            {
-                warnings.push(format!("could not set workspace session options: {e}"));
+
+        let workspace_id = herdr.ensure_workspace()?;
+        let started = match herdr.start(&name, &worktree, &env, &command, &workspace_id, true) {
+            Ok(info) => info,
+            Err(e) => {
+                // Best-effort cleanup of any half-created pane.
+                if let Ok(after) = herdr.list() {
+                    if let Some(a) = after.iter().find(|a| a.name == name) {
+                        herdr.close(&a.pane_id).ok();
+                    }
+                }
+                return Err(e.into());
             }
-        }
+        };
+        debug_assert_eq!(started.name, name);
 
         let event = SessionEvent {
             ts: chrono::Utc::now(),
@@ -159,8 +177,6 @@ pub fn open_session(
         name
     };
 
-    cortado_term::launcher_for(&config.terminal, config.tmux.socket.clone())
-        .open(&session, &format!("{}/{}", entry.team, entry.slug))?;
     Ok(OpenOutcome { session, warnings })
 }
 
@@ -172,9 +188,9 @@ fn runtime_display(runtime: RuntimeId) -> &'static str {
     }
 }
 
-/// Resolve without executing the program. Detached tmux can report a
-/// successful spawn before a missing child command exits, so launch must
-/// validate the runtime itself first.
+/// Resolve without executing the program. Herdr can report a successful
+/// start before a missing child argv[0] exits, so launch must validate the
+/// runtime itself first.
 fn find_executable(binary: &str) -> Option<PathBuf> {
     let candidate = Path::new(binary);
     if candidate.components().count() > 1 {
