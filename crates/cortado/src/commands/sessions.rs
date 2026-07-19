@@ -1,14 +1,33 @@
 use cortado_core::config::Config;
+use cortado_core::session_log::models_for;
 use cortado_core::session_name::SessionName;
 use cortado_core::store::Store;
-use cortado_tmux::Tmux;
+use cortado_herdr::Herdr;
+
+fn herdr(config: &Config) -> Herdr {
+    Herdr::new(
+        config.herdr.binary.clone(),
+        config.herdr.workspace.clone(),
+        Config::herdr_session(),
+    )
+}
 
 pub fn ls() -> anyhow::Result<()> {
     let config = Config::load()?;
-    let tmux = Tmux::new(config.tmux.socket.clone());
-    for name in tmux.list()? {
-        if let Some(parsed) = SessionName::parse(&name) {
-            println!("{:<40} {}/{}", name, parsed.team, parsed.agent);
+    let store = Store::new(config.root()?);
+    let live = herdr(&config).list()?;
+    let names: Vec<String> = live.iter().map(|a| a.name.clone()).collect();
+    let models = models_for(&store, &names);
+    for a in &live {
+        if let Some(parsed) = SessionName::parse(&a.name) {
+            println!(
+                "{:<40} {}/{:<20} {:<8} {}",
+                a.name,
+                parsed.team,
+                parsed.agent,
+                a.status,
+                models.get(&a.name).map(String::as_str).unwrap_or("?"),
+            );
         }
     }
     Ok(())
@@ -19,34 +38,36 @@ pub struct KillOutcome {
     pub failed: Vec<String>,
 }
 
-/// Kill every live session of team/agent (or unique bare slug).
+/// Close every live pane of team/agent (or unique bare slug).
 pub fn kill_agent(reference: &str) -> anyhow::Result<KillOutcome> {
     let config = Config::load()?;
-    let tmux = Tmux::new(config.tmux.socket.clone());
+    let h = herdr(&config);
     let store = Store::new(config.root()?);
     let entry = store.resolve(reference)?;
-    let mut out = KillOutcome {
-        killed: Vec::new(),
-        failed: Vec::new(),
-    };
-    for name in tmux.list()? {
-        if SessionName::parse(&name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+    let mut out = KillOutcome { killed: Vec::new(), failed: Vec::new() };
+    for a in h.list()? {
+        if SessionName::parse(&a.name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         {
-            match tmux.kill(&name) {
-                Ok(()) => out.killed.push(name),
-                Err(e) => out.failed.push(format!("{name}: {e}")),
+            match h.close(&a.pane_id) {
+                Ok(()) => out.killed.push(a.name),
+                Err(e) => out.failed.push(format!("{}: {e}", a.name)),
             }
         }
     }
     Ok(out)
 }
 
-/// Kill one session by exact name, or every session of team/agent | bare slug.
+/// Close one session by exact name, or every session of team/agent | bare slug.
 pub fn kill(target: &str) -> anyhow::Result<()> {
     let config = Config::load()?;
-    let tmux = Tmux::new(config.tmux.socket.clone());
+    let h = herdr(&config);
     if SessionName::parse(target).is_some() {
-        tmux.kill(target)?;
+        let live = h.list()?;
+        let Some(a) = live.iter().find(|a| a.name == target) else {
+            println!("no live session named {target}");
+            return Ok(());
+        };
+        h.close(&a.pane_id)?;
         println!("killed {target}");
         return Ok(());
     }
