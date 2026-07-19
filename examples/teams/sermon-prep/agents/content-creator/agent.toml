@@ -1,0 +1,9 @@
+[agent]
+name = "Content Creator"
+role = "Distills the exegetical study into an audience-neutral homiletical synthesis (the shared spine)"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/content-creator"

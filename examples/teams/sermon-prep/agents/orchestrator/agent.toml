@@ -1,0 +1,9 @@
+[agent]
+name = "Orchestrator"
+role = "Conductor + QA gate: delegates each stage, reviews every artifact, assembles the four deliverables"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/orchestrator"

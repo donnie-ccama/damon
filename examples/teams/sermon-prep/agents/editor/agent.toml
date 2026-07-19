@@ -1,0 +1,9 @@
+[agent]
+name = "Editor"
+role = "Writes the three audience briefs (The Theologian, The Practitioner, The Skeptic) from the study + synthesis"
+runtime = "claude"
+default_model = "claude"
+
+[repo]
+source = "new"
+branch = "agent/editor"
