@@ -23,8 +23,8 @@ enum CheckStatus {
     Ok(String),
     Missing,
     TooOld {
-        found: (u32, u32),
-        need: (u32, u32),
+        found: (u32, u32, u32),
+        need: (u32, u32, u32),
     },
 }
 
@@ -48,11 +48,12 @@ fn render(c: &CheckResult) -> String {
         CheckStatus::Ok(detail) => format!("ok {detail}"),
         CheckStatus::Missing => c.hint.clone().unwrap_or_else(|| "missing".to_string()),
         CheckStatus::TooOld { found, need } => format!(
-            "too old ({}.{}, need >= {}.{}){}",
+            "too old ({}.{}, need >= {}.{}.{}){}",
             found.0,
             found.1,
             need.0,
             need.1,
+            need.2,
             c.hint
                 .as_ref()
                 .map(|h| format!(" — {h}"))
@@ -97,17 +98,18 @@ fn check_herdr() -> CheckResult {
         };
     };
     let text = String::from_utf8_lossy(&out.stdout).to_string();
+    const NEED: (u32, u32, u32) = (0, 7, 4);
     match cortado_herdr::parse_herdr_version(&text) {
-        Some((ma, mi)) if (ma, mi) >= (0, 7) => {
+        Some((ma, mi, pa)) if (ma, mi, pa) >= NEED => {
             let server = Command::new("herdr")
                 .args(["status", "server"])
                 .output()
                 .map(|o| cortado_herdr::parse_status_running(&String::from_utf8_lossy(&o.stdout)))
                 .unwrap_or(false);
             let detail = if server {
-                format!("({ma}.{mi}, server running)")
+                format!("({ma}.{mi}.{pa}, server running)")
             } else {
-                format!("({ma}.{mi}, server not running — starts on `cortado open`)")
+                format!("({ma}.{mi}.{pa}, server not running — starts on `cortado open`)")
             };
             CheckResult {
                 name: "herdr",
@@ -117,10 +119,7 @@ fn check_herdr() -> CheckResult {
         }
         Some(found) => CheckResult {
             name: "herdr",
-            status: CheckStatus::TooOld {
-                found,
-                need: (0, 7),
-            },
+            status: CheckStatus::TooOld { found, need: NEED },
             hint: Some(hint("herdr")),
         },
         None => CheckResult {
@@ -189,8 +188,8 @@ mod tests {
             CheckResult {
                 name: "herdr",
                 status: CheckStatus::TooOld {
-                    found: (0, 6),
-                    need: (0, 7),
+                    found: (0, 6, 9),
+                    need: (0, 7, 4),
                 },
                 hint: Some("install: brew install herdr".into()),
             },
@@ -219,12 +218,12 @@ mod tests {
             render(&CheckResult {
                 name: "herdr",
                 status: CheckStatus::TooOld {
-                    found: (0, 6),
-                    need: (0, 7),
+                    found: (0, 6, 9),
+                    need: (0, 7, 4),
                 },
                 hint: Some("install: brew install herdr".into()),
             }),
-            "too old (0.6, need >= 0.7) — install: brew install herdr"
+            "too old (0.6, need >= 0.7.4) — install: brew install herdr"
         );
         assert_eq!(
             render(&CheckResult {

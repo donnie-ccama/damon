@@ -72,6 +72,30 @@ pub fn open_session(
         other => anyhow::bail!("unknown runtime {other:?} in models.toml"),
     };
 
+    // Hermetic, user-fixable checks first — fail before ever touching Herdr.
+    let mut env: BTreeMap<String, String> = model
+        .env
+        .iter()
+        .map(|(k, v)| resolve_model_env(key, k, v))
+        .collect::<anyhow::Result<_>>()?;
+
+    let binary = runtime.binary();
+    if find_executable(&binary).is_none() {
+        let install = match runtime {
+            RuntimeId::Opencode if cfg!(target_os = "macos") => {
+                "install it with `brew install anomalyco/tap/opencode`"
+            }
+            RuntimeId::Opencode => "install OpenCode from https://opencode.ai/docs",
+            RuntimeId::Codex => "install Codex, or ensure `codex` is on PATH",
+            RuntimeId::Claude => "install Claude Code, or ensure `claude` is on PATH",
+        };
+        anyhow::bail!(
+            "{} runtime executable {binary:?} was not found; {install}, or set CORTADO_BIN_{}",
+            runtime_display(runtime),
+            runtime.as_str().to_uppercase()
+        );
+    }
+
     let herdr = Herdr::new(
         config.herdr.binary.clone(),
         config.herdr.workspace.clone(),
@@ -115,32 +139,11 @@ pub fn open_session(
 
         let live_names: Vec<String> = live.iter().map(|a| a.name.clone()).collect();
         let name = SessionName::next_free(&entry.team, &entry.slug, &live_names).encode();
-        let mut env: BTreeMap<String, String> = model
-            .env
-            .iter()
-            .map(|(k, v)| resolve_model_env(key, k, v))
-            .collect::<anyhow::Result<_>>()?;
         env.insert("CORTADO_TEAM".into(), entry.team.to_string());
         env.insert("CORTADO_AGENT".into(), entry.slug.to_string());
         env.insert("CORTADO_MODEL".into(), key.to_string());
         env.insert("CORTADO_SESSION".into(), name.clone());
 
-        let binary = runtime.binary();
-        if find_executable(&binary).is_none() {
-            let install = match runtime {
-                RuntimeId::Opencode if cfg!(target_os = "macos") => {
-                    "install it with `brew install anomalyco/tap/opencode`"
-                }
-                RuntimeId::Opencode => "install OpenCode from https://opencode.ai/docs",
-                RuntimeId::Codex => "install Codex, or ensure `codex` is on PATH",
-                RuntimeId::Claude => "install Claude Code, or ensure `claude` is on PATH",
-            };
-            anyhow::bail!(
-                "{} runtime executable {binary:?} was not found; {install}, or set CORTADO_BIN_{}",
-                runtime_display(runtime),
-                runtime.as_str().to_uppercase()
-            );
-        }
         let mut command = vec![binary];
         // Test seam: extra args for substitute binaries (e.g. sleep 30).
         let args_var = format!("CORTADO_{}_ARGS", runtime.as_str().to_uppercase());

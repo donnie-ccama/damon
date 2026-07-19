@@ -1,5 +1,6 @@
 //! Herdr wrapper: shells out to the `herdr` CLI and parses its JSON envelopes.
 //! Stateless — every question re-asks Herdr; nothing is cached.
+use fs4::fs_std::FileExt;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -91,6 +92,22 @@ fn redact_values(args: &[String], text: &str) -> String {
     out
 }
 
+/// Redact known `--env K=V` values inside a `HerdrError` produced from
+/// stdout-derived text (`parse_envelope`'s JSON `error.message`, or its
+/// `Parse` variant embedding raw stdout). `run()`'s stderr path already
+/// redacts before constructing `Failed`; this covers the stdout path, which
+/// otherwise bypasses `redact_values` entirely.
+fn redact_err(args: &[String], err: HerdrError) -> HerdrError {
+    match err {
+        HerdrError::Failed { args: a, stderr } => HerdrError::Failed {
+            args: a,
+            stderr: redact_values(args, &stderr),
+        },
+        HerdrError::Parse(msg) => HerdrError::Parse(redact_values(args, &msg)),
+        other => other,
+    }
+}
+
 /// Unwrap the one-line JSON envelope: `{"result": {...}}` or `{"error": {...}}`.
 pub fn parse_envelope(stdout: &str) -> Result<serde_json::Value, HerdrError> {
     let v: serde_json::Value = serde_json::from_str(stdout.trim())
@@ -176,11 +193,15 @@ pub fn parse_status_running(text: &str) -> bool {
     text.lines().any(|l| l.trim() == "status: running")
 }
 
-/// `herdr --version` → `herdr 0.7.4` → (0, 7).
-pub fn parse_herdr_version(text: &str) -> Option<(u32, u32)> {
+/// `herdr --version` → `herdr 0.7.4` → (0, 7, 4). A missing patch component
+/// (`herdr 0.7`) defaults to 0.
+pub fn parse_herdr_version(text: &str) -> Option<(u32, u32, u32)> {
     let ver = text.trim().strip_prefix("herdr ")?;
     let mut it = ver.split('.');
-    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+    let major = it.next()?.parse().ok()?;
+    let minor = it.next()?.parse().ok()?;
+    let patch = it.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
 }
 
 pub struct Herdr {
@@ -340,7 +361,7 @@ impl Herdr {
             // JSON error envelope on stdout beats raw stderr.
             if let Ok(serde_json::Value::Object(_)) = serde_json::from_str(&stdout) {
                 return match parse_envelope(&stdout) {
-                    Err(e) => Err(e),
+                    Err(e) => Err(redact_err(args, e)),
                     Ok(_) => Err(HerdrError::Failed {
                         args: display_args(args),
                         stderr,
@@ -357,7 +378,7 @@ impl Herdr {
                 stderr,
             });
         }
-        parse_envelope(&stdout)
+        parse_envelope(&stdout).map_err(|e| redact_err(args, e))
     }
 
     /// Plain-text commands (`status server`); success text returned as-is.
@@ -418,7 +439,35 @@ impl Herdr {
     }
 
     /// Find the workspace with our label, or create it. Returns workspace_id.
+    ///
+    /// Two concurrent `cortado open`s can both list, see no matching
+    /// workspace, and both create one — a duplicate "Cortado" workspace.
+    /// Guard the list-then-create span with a cross-process advisory lock,
+    /// scoped per herdr session so isolated test sessions don't serialize
+    /// against the developer's default session. flock is released on fd
+    /// close (and explicitly below), so a crash leaves no stale lock.
     pub fn ensure_workspace(&self) -> Result<String, HerdrError> {
+        let session_name = self.session.as_deref().unwrap_or("default");
+        let lock_path = std::env::temp_dir().join(format!("cortado-herdr-ws-{session_name}.lock"));
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| HerdrError::Failed {
+                args: "ensure_workspace lock".into(),
+                stderr: format!("cannot open lock file {}: {e}", lock_path.display()),
+            })?;
+        lock.lock_exclusive().map_err(|e| HerdrError::Failed {
+            args: "ensure_workspace lock".into(),
+            stderr: format!("cannot lock {}: {e}", lock_path.display()),
+        })?;
+        let result = self.ensure_workspace_locked();
+        let _ = FileExt::unlock(&lock); // also released on drop
+        result
+    }
+
+    fn ensure_workspace_locked(&self) -> Result<String, HerdrError> {
         let list = parse_workspace_list(&self.run(&self.workspace_list_args())?)?;
         if let Some((id, _)) = list.into_iter().find(|(_, l)| l == &self.workspace_label) {
             return Ok(id);
@@ -567,7 +616,8 @@ mod tests {
     fn server_status_text_parses() {
         assert!(parse_status_running("status: running\nversion: 0.7.4\n"));
         assert!(!parse_status_running("status: stopped\n"));
-        assert_eq!(parse_herdr_version("herdr 0.7.4"), Some((0, 7)));
+        assert_eq!(parse_herdr_version("herdr 0.7.4"), Some((0, 7, 4)));
+        assert_eq!(parse_herdr_version("herdr 0.7"), Some((0, 7, 0)));
         assert_eq!(parse_herdr_version("nonsense"), None);
     }
 
@@ -677,5 +727,41 @@ mod tests {
         assert!(red.contains("OPENROUTER_API_KEY=***"));
         // short value "demo" untouched — session name not mangled
         assert!(red.contains("cortado_demo_scout_1"));
+    }
+
+    #[test]
+    fn envelope_error_message_is_redacted() {
+        // Herdr's own JSON error envelope can echo the offending argv,
+        // including secrets -- this must not bypass redaction.
+        let args: Vec<String> = vec![
+            "agent".into(),
+            "start".into(),
+            "x".into(),
+            "--env".into(),
+            "OPENROUTER_API_KEY=sk-verylongsecret123".into(),
+        ];
+        let err_json =
+            r#"{"error":{"message":"failed: sk-verylongsecret123 leaked"},"id":"cli:agent:start"}"#;
+        let err = parse_envelope(err_json).unwrap_err();
+        match redact_err(&args, err) {
+            HerdrError::Failed { stderr, .. } => {
+                assert!(!stderr.contains("sk-verylongsecret123"));
+                assert!(stderr.contains("***"));
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_error_text_is_redacted() {
+        // The `Parse` variant embeds raw stdout on shape mismatches -- also a
+        // secret-echo vector that must go through redaction.
+        let args: Vec<String> = vec!["--env".into(), "TOKEN=abcdefgh12345678".into()];
+        let text = r#"{"nope": "abcdefgh12345678"}"#;
+        let err = parse_envelope(text).unwrap_err();
+        match redact_err(&args, err) {
+            HerdrError::Parse(msg) => assert!(!msg.contains("abcdefgh12345678")),
+            other => panic!("expected Parse, got {other:?}"),
+        }
     }
 }

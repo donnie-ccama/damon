@@ -581,6 +581,7 @@ dependencies = [
 name = "cortado-herdr"
 version = "0.2.0"
 dependencies = [
+ "fs4",
  "serde_json",
  "thiserror 2.0.18",
 ]

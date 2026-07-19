@@ -48,7 +48,15 @@ fn event_loop(
 ) -> anyhow::Result<()> {
     let mut model = Model::default();
     let mut logo = view::LogoState::new();
-    let mut world = load_world(config, herdr);
+    // Ensure the herdr server exists before the first read. The server
+    // outlives this process once started, so a later load_world failure is
+    // a genuinely transient/self-healing condition — the "retrying" text on
+    // the error screen is honest about that only if we don't enter the loop
+    // with the server never having been started at all.
+    let mut world = match herdr.ensure_server() {
+        Ok(()) => load_world(config, herdr),
+        Err(e) => Err(format!("{e}")),
+    };
     loop {
         // Herdr's workspace can be attached from several terminal windows.
         // Refresh between event reads so a newly attached client supplies

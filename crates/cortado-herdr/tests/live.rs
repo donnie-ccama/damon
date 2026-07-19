@@ -12,13 +12,16 @@ fn herdr_available() -> bool {
 }
 
 /// Starts `herdr --session <name> server` detached; stops + deletes on drop.
+/// `tag` disambiguates sessions between tests in this file — the process id
+/// alone collides when two IsoSession-backed tests run concurrently (the
+/// default `cargo test` threading), since they share one pid.
 struct IsoSession {
     name: String,
 }
 
 impl IsoSession {
-    fn start() -> IsoSession {
-        let name = format!("cortadotest{}", std::process::id());
+    fn start(tag: &str) -> IsoSession {
+        let name = format!("cortadotest{tag}{}", std::process::id());
         let h = Herdr::new("herdr".into(), "Cortado".into(), Some(name.clone()));
         h.ensure_server()
             .expect("isolated herdr server should start");
@@ -48,7 +51,7 @@ fn full_agent_round_trip() {
         eprintln!("skipping: herdr not installed");
         return;
     }
-    let iso = IsoSession::start();
+    let iso = IsoSession::start("full");
     let h = iso.herdr();
 
     // ensure_workspace is idempotent
@@ -101,6 +104,41 @@ fn full_agent_round_trip() {
     h.close(&live[0].pane_id).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert!(h.list().unwrap().is_empty());
+}
+
+/// Two concurrent `ensure_workspace` calls (as two concurrent `cortado
+/// open`s would trigger) must not create two "Cortado" workspaces. Guards
+/// the fs4-flock fix around the list-then-create span.
+#[test]
+fn ensure_workspace_race_creates_one_workspace() {
+    if !herdr_available() {
+        eprintln!("skipping: herdr not installed");
+        return;
+    }
+    let iso = IsoSession::start("ws");
+    let h1 = iso.herdr();
+    let h2 = iso.herdr();
+    let t1 = std::thread::spawn(move || h1.ensure_workspace().unwrap());
+    let t2 = std::thread::spawn(move || h2.ensure_workspace().unwrap());
+    let id1 = t1.join().unwrap();
+    let id2 = t2.join().unwrap();
+    assert_eq!(id1, id2, "both calls should resolve to the same workspace");
+
+    let out = Command::new("herdr")
+        .args(["--session", &iso.name, "workspace", "list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let v = cortado_herdr::parse_envelope(&stdout).unwrap();
+    let workspaces = cortado_herdr::parse_workspace_list(&v).unwrap();
+    let cortado_count = workspaces
+        .iter()
+        .filter(|(_, label)| label == "Cortado")
+        .count();
+    assert_eq!(
+        cortado_count, 1,
+        "expected exactly one Cortado workspace, got {workspaces:?}"
+    );
 }
 
 #[test]

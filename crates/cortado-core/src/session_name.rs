@@ -75,6 +75,23 @@ mod tests {
         }
     }
 
+    /// Pins numeric (not lexical) ordering for the "most recent session"
+    /// picker in `commands::open::open_session`, which reattaches to
+    /// `live.iter().max_by_key(|a| SessionName::parse(&a.name).map(|n| n.n))`.
+    /// A lexical/string comparison of "_9" vs "_10" would rank "_9" higher
+    /// ('9' > '1' byte-wise); parsing `n` into a `u32` first prevents that.
+    #[test]
+    fn parse_orders_numerically_not_lexically() {
+        let names = ["cortado_demo_scout_9", "cortado_demo_scout_10"];
+        let parsed: Vec<SessionName> = names
+            .iter()
+            .map(|n| SessionName::parse(n).unwrap())
+            .collect();
+        let most_recent = parsed.iter().max_by_key(|s| s.n).unwrap();
+        assert_eq!(most_recent.n, 10);
+        assert_eq!(most_recent.encode(), "cortado_demo_scout_10");
+    }
+
     #[test]
     fn next_free_picks_lowest_gap() {
         let live = vec![

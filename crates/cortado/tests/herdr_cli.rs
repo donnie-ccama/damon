@@ -81,6 +81,15 @@ fn open_sessions_kill_round_trip() {
     run(&["open", "scout"], &envs)
         .success()
         .stdout(contains("cortado_demo_scout_1"));
+    // Reattach: a plain `open` on an agent with a live session focuses it
+    // rather than spawning a second one.
+    run(&["open", "scout"], &envs)
+        .success()
+        .stdout(contains("cortado_demo_scout_1"));
+    // `--new` always spawns a fresh session regardless of the live one.
+    run(&["open", "scout", "--new"], &envs)
+        .success()
+        .stdout(contains("cortado_demo_scout_2"));
     run(&["sessions"], &envs)
         .success()
         .stdout(contains("demo/scout"));
@@ -89,11 +98,60 @@ fn open_sessions_kill_round_trip() {
         .stdout(contains("killed"));
 }
 
+/// A failed hermetic pre-check (bad runtime binary) must not spawn anything
+/// or append a spawn event to sessions.jsonl. With Fix 1's reorder, the
+/// runtime-binary check now runs before Herdr is ever contacted, so this
+/// path is purely hermetic — a live herdr session is not strictly required
+/// to observe the failure, but `CORTADO_HERDR_SESSION` is still set as a
+/// belt-and-suspenders guard in case that ordering ever regresses.
+#[test]
+fn failed_binary_check_does_not_log_a_spawn_event() {
+    if !herdr_available() {
+        eprintln!("skipping: herdr not installed");
+        return;
+    }
+    let iso = IsoSession::new("badbin");
+    let root = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    let envs: Vec<(&str, String)> = vec![
+        ("CORTADO_ROOT", root.path().to_str().unwrap().to_string()),
+        (
+            "CORTADO_CONFIG_DIR",
+            cfg.path().to_str().unwrap().to_string(),
+        ),
+        ("CORTADO_HERDR_SESSION", iso.name.clone()),
+        (
+            "CORTADO_BIN_CLAUDE",
+            "/nonexistent-cortado-runtime-binary".to_string(),
+        ),
+    ];
+
+    run(&["team", "new", "Demo"], &envs).success();
+    run(&["agent", "new", "demo/Scout", "--repo-new"], &envs).success();
+    run(&["open", "scout"], &envs)
+        .failure()
+        .stderr(contains("was not found"));
+
+    let sessions_log = root
+        .path()
+        .join("teams")
+        .join("demo")
+        .join("agents")
+        .join("scout")
+        .join("logs")
+        .join("sessions.jsonl");
+    assert!(
+        !sessions_log.exists(),
+        "a failed open must not append a spawn event"
+    );
+}
+
 /// Restores keyring-error coverage deleted from cli_open.rs in Task 5 (see
-/// the comment in that file): `open` now contacts Herdr, via
-/// `ensure_server`/`list`, before it resolves model env vars, so the
-/// keyring-missing-key path needs an isolated session too, not just
-/// `CORTADO_NO_KEYRING`.
+/// the comment in that file). `open` now resolves model env vars (and thus
+/// the keyring) hermetically, before it ever contacts Herdr — this test no
+/// longer strictly needs a live herdr session to hit the error, but keeps
+/// the isolated session anyway as a safety net in case the hermetic ordering
+/// regresses.
 #[test]
 fn open_missing_key_names_the_fix() {
     if !herdr_available() {
