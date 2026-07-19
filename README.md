@@ -304,13 +304,12 @@ a complete migration.
 - **M5 (shipped)** — single-window workspace: `cortado ui` rail + agent
   viewer panes in one tmux client (`launcher = "workspace"`, the new
   default), native tmux keys everywhere, agent sessions untouched.
-- **M6 (in verification)** — Herdr substrate swap: tmux + Ghostty + the
+- **M6 (shipped)** — Herdr substrate swap: tmux + Ghostty + the
   workspace session layer replaced by [Herdr](https://herdr.dev). `open` /
   `sessions` / `kill` / `doctor` / `ui` all drive Herdr through the new
   `cortado-herdr` crate; `cortado-tmux` and `cortado-term` are gone. Data
-  model and memory model are unchanged. Code-complete and unit/integration
-  green; pending a manual end-to-end pass on macOS with real Herdr + Claude
-  Code before this line reads "shipped".
+  model and memory model are unchanged. Verified end-to-end on macOS with
+  real Herdr 0.7.4 + Claude Code.
 
 ### Migrating from a tmux-era install
 
