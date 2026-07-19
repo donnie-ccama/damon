@@ -61,7 +61,7 @@ fn render(c: &CheckResult) -> String {
     }
 }
 
-const REQUIRED: [&str; 2] = ["git", "tmux"];
+const REQUIRED: [&str; 2] = ["git", "herdr"];
 
 fn failed_required(checks: &[CheckResult]) -> Vec<&'static str> {
     checks
@@ -87,51 +87,40 @@ fn check_git() -> CheckResult {
     }
 }
 
-fn check_tmux() -> CheckResult {
-    match cortado_tmux::version() {
-        Ok((ma, mi)) if (ma, mi) >= (3, 2) => CheckResult {
-            name: "tmux",
-            status: CheckStatus::Ok(format!("({ma}.{mi})")),
-            hint: None,
-        },
-        Ok((ma, mi)) => CheckResult {
-            name: "tmux",
-            status: CheckStatus::TooOld {
-                found: (ma, mi),
-                need: (3, 2),
-            },
-            hint: Some(hint("tmux")),
-        },
-        Err(_) => CheckResult {
-            name: "tmux",
+fn check_herdr() -> CheckResult {
+    let version_out = Command::new("herdr").arg("--version").output();
+    let Ok(out) = version_out else {
+        return CheckResult {
+            name: "herdr",
             status: CheckStatus::Missing,
-            hint: Some(hint("tmux")),
-        },
-    }
-}
-
-fn check_ghostty() -> CheckResult {
-    // App-bundle check on macOS; PATH lookup on Linux.
-    let ok = if cfg!(target_os = "macos") {
-        std::path::Path::new("/Applications/Ghostty.app").exists() || found("ghostty", "--version")
-    } else {
-        found("ghostty", "--version")
+            hint: Some(hint("herdr")),
+        };
     };
-    if ok {
-        CheckResult {
-            name: "ghostty",
-            status: CheckStatus::Ok(String::new()),
-            hint: None,
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    match cortado_herdr::parse_herdr_version(&text) {
+        Some((ma, mi)) if (ma, mi) >= (0, 7) => {
+            let server = Command::new("herdr")
+                .args(["status", "server"])
+                .output()
+                .map(|o| cortado_herdr::parse_status_running(&String::from_utf8_lossy(&o.stdout)))
+                .unwrap_or(false);
+            let detail = if server {
+                format!("({ma}.{mi}, server running)")
+            } else {
+                format!("({ma}.{mi}, server not running — starts on `cortado open`)")
+            };
+            CheckResult { name: "herdr", status: CheckStatus::Ok(detail), hint: None }
         }
-    } else {
-        CheckResult {
-            name: "ghostty",
+        Some(found) => CheckResult {
+            name: "herdr",
+            status: CheckStatus::TooOld { found, need: (0, 7) },
+            hint: Some(hint("herdr")),
+        },
+        None => CheckResult {
+            name: "herdr",
             status: CheckStatus::Missing,
-            hint: Some(format!(
-                "{} (or use launcher = \"env-terminal\")",
-                hint("ghostty")
-            )),
-        }
+            hint: Some(hint("herdr")),
+        },
     }
 }
 
@@ -153,7 +142,7 @@ fn check_runtime(rt: RuntimeId) -> CheckResult {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    let mut checks = vec![check_git(), check_tmux(), check_ghostty()];
+    let mut checks = vec![check_git(), check_herdr()];
     for rt in [RuntimeId::Claude, RuntimeId::Codex, RuntimeId::Opencode] {
         checks.push(check_runtime(rt));
     }
@@ -182,7 +171,7 @@ mod tests {
 
     #[test]
     fn gate_passes_when_required_checks_are_ok() {
-        let checks = vec![ok("git"), ok("tmux")];
+        let checks = vec![ok("git"), ok("herdr")];
         assert!(failed_required(&checks).is_empty());
     }
 
@@ -191,12 +180,12 @@ mod tests {
         let checks = vec![
             ok("git"),
             CheckResult {
-                name: "tmux",
+                name: "herdr",
                 status: CheckStatus::TooOld {
-                    found: (3, 1),
-                    need: (3, 2),
+                    found: (0, 6),
+                    need: (0, 7),
                 },
-                hint: Some("install: brew install tmux".into()),
+                hint: Some("install: brew install herdr".into()),
             },
             // Optional tools never gate, whatever their status.
             CheckResult {
@@ -205,7 +194,7 @@ mod tests {
                 hint: Some("not found (claude) — optional until you use it".into()),
             },
         ];
-        assert_eq!(failed_required(&checks), vec!["tmux"]);
+        assert_eq!(failed_required(&checks), vec!["herdr"]);
     }
 
     #[test]
@@ -213,22 +202,22 @@ mod tests {
         assert_eq!(render(&ok("git")), "ok");
         assert_eq!(
             render(&CheckResult {
-                name: "tmux",
-                status: CheckStatus::Ok("(3.7)".into()),
+                name: "herdr",
+                status: CheckStatus::Ok("(0.7, server running)".into()),
                 hint: None,
             }),
-            "ok (3.7)"
+            "ok (0.7, server running)"
         );
         assert_eq!(
             render(&CheckResult {
-                name: "tmux",
+                name: "herdr",
                 status: CheckStatus::TooOld {
-                    found: (3, 1),
-                    need: (3, 2),
+                    found: (0, 6),
+                    need: (0, 7),
                 },
-                hint: Some("install: brew install tmux".into()),
+                hint: Some("install: brew install herdr".into()),
             }),
-            "too old (3.1, need >= 3.2) — install: brew install tmux"
+            "too old (0.6, need >= 0.7) — install: brew install herdr"
         );
         assert_eq!(
             render(&CheckResult {

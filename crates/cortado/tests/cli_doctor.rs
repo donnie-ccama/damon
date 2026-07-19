@@ -19,13 +19,13 @@ fn doctor_fails_with_hints_when_required_tools_missing() {
         .failure()
         .stdout(
             contains("git")
-                .and(contains("tmux"))
+                .and(contains("herdr"))
                 .and(contains("install")),
         );
 }
 
 #[test]
-fn doctor_succeeds_when_git_and_tmux_present() {
+fn doctor_succeeds_when_git_and_herdr_present() {
     let root = tempfile::tempdir().unwrap();
     let cfg = tempfile::tempdir().unwrap();
     cortado(root.path(), cfg.path())
