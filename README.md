@@ -5,15 +5,17 @@ agents — each with its own git worktree, runtime CLI, and self-curated
 markdown memory — and work alongside them in real terminals. Come back
 tomorrow and the same agent remembers what it learned today.
 
-Cortado is deliberately boring under the hood: **plain files are the database,
-tmux is the session layer, [Ghostty](https://ghostty.org) is the window.**
-There is no daemon, no SQLite, no cloud. Everything cortado knows lives in
-folders you can read, edit, back up, and rsync between machines.
+Cortado is deliberately boring under the hood: **plain files are the
+database, [Herdr](https://herdr.dev) is the session layer and window.**
+There is no daemon of cortado's own, no SQLite, no cloud. Everything cortado
+knows lives in folders you can read, edit, back up, and rsync between
+machines; agents themselves are ephemeral processes over that persistent
+memory.
 
 ```
 $ cortado open scout
-session cortado_newsletter_scout_1        ← tmux session, spawned in the agent's worktree
-                                        ← a Ghostty window opens with Claude Code running
+session cortado_newsletter_scout_1        ← Herdr agent pane, spawned in the agent's worktree
+                                        ← Claude Code boots inside it, memory imported
 ```
 
 > **New to cortado?** Open the no-jargon guided tour —
@@ -37,14 +39,15 @@ session cortado_newsletter_scout_1        ← tmux session, spawned in the agent
   (`--repo-new`), a clone (`--repo-clone URL`), or attach it to an existing
   local project via git worktree (`--repo-worktree PATH`) so several agents
   can work the same codebase on isolated branches.
-- **Sessions that survive** — every session is a tmux session on a
-  dedicated socket. Close the window, log out, come back: `cortado open`
-  reattaches exactly where the agent left off. Only `cortado kill` (or a
-  reboot) ends a session.
+- **Sessions that survive** — a live session is an agent pane in the Herdr
+  server; closing the Herdr client detaches it, it does not kill it. The
+  durable thing was never the session, though — it's the memory. `cortado
+  open` materializes an agent pane on demand (reattach if one's live, spawn
+  fresh with memory loaded if not); `cortado kill` (or a reboot) ends it.
 - **Model registry** — `models.toml` maps friendly names to runtime +
   environment. Ships with Claude, GPT (Codex), OpenRouter GPT-5, Kimi,
   MiniMax, and GLM entries. Adding a model is editing TOML, not code.
-- **Stateless and honest** — `cortado sessions` asks tmux, `cortado team ls`
+- **Stateless and honest** — `cortado sessions` asks Herdr, `cortado team ls`
   reads the filesystem. Nothing is cached, so nothing can drift. Broken
   TOML and stray directories are reported, never silently hidden.
 - **One layout everywhere** — identical paths on macOS and Linux:
@@ -55,8 +58,7 @@ session cortado_newsletter_scout_1        ← tmux session, spawned in the agent
 | Tool | Why | Required? |
 |---|---|---|
 | git | every agent gets a repo or worktree | yes |
-| tmux ≥ 3.2 | session persistence | yes |
-| [Ghostty](https://ghostty.org) | terminal windows | recommended (any `$TERMINAL` works) |
+| herdr ≥ 0.7.4 | session layer & window | yes |
 | agent runtime: [Claude Code](https://code.claude.com) / [Codex](https://github.com/openai/codex) / [OpenCode](https://opencode.ai) | install the runtimes you use (Claude Code is the default) | for `cortado open` |
 | Rust toolchain | building cortado | build only |
 
@@ -67,8 +69,8 @@ session cortado_newsletter_scout_1        ← tmux session, spawned in the agent
 ### macOS
 
 ```bash
-brew install tmux ghostty rustup && rustup-init -y   # skip what you already have
-npm i -g @anthropic-ai/claude-code                   # the agent runtime
+brew install herdr rustup && rustup-init -y   # skip what you already have
+npm i -g @anthropic-ai/claude-code            # the agent runtime
 
 git clone https://github.com/donnie-ccama/cortado.git
 cd cortado
@@ -80,8 +82,9 @@ cortado doctor && cortado init
 ### Omarchy / Arch Linux
 
 ```bash
-sudo pacman -S --needed git tmux ghostty rustup && rustup default stable
+sudo pacman -S --needed git rustup && rustup default stable
 npm i -g @anthropic-ai/claude-code
+# herdr isn't packaged for Arch yet — install it per https://herdr.dev
 
 git clone https://github.com/donnie-ccama/cortado.git
 cd cortado
@@ -89,11 +92,6 @@ cargo install --path crates/cortado
 
 cortado doctor && cortado init
 ```
-
-Omarchy ships Ghostty as its default terminal, so the only additions are
-usually tmux and the Rust toolchain. If you prefer another terminal, set
-`launcher = "env-terminal"` in `~/.config/cortado/config.toml` and cortado will
-use `$TERMINAL` instead.
 
 ## Quickstart
 
@@ -103,8 +101,8 @@ cortado agent new newsletter/Scout --repo-new --role "Researches topics"
 cortado open scout
 ```
 
-A Ghostty window opens with Claude Code running inside Scout's worktree,
-with Scout's memory loaded. First open only: Claude Code asks to allow the
+A Herdr pane opens with Claude Code running inside Scout's worktree, with
+Scout's memory loaded. First open only: Claude Code asks to allow the
 external memory imports — answer **allow** (memory intentionally lives
 outside the worktree).
 
@@ -135,7 +133,7 @@ cortado agent new web/Fixer --repo-worktree ~/Projects/my-site
 
 ```
 cortado init                            scaffold ~/cortado + default config
-cortado doctor                          check git/tmux/ghostty/runtimes, with install hints
+cortado doctor                          check git/herdr/runtimes, with install hints
 cortado team new <name> | ls | rm <team> [--force]
 cortado agent new <team>/<Name> [--role STR] [--runtime claude|codex|opencode]
       (--repo-new | --repo-clone URL | --repo-worktree PATH) [--branch B]
@@ -156,13 +154,14 @@ cortado ui
 ```
 
 A ratatui screen over the same teams/agents rail as `cortado team ls` /
-`cortado agent ls`, plus live tmux session state. `cortado ui` is **stateless**:
-it re-derives everything from the filesystem and `tmux -L cortado
-list-sessions` on a 2s tick (and immediately after any action) — nothing is
-cached, so nothing can drift, same principle as the CLI. Every key below
-calls the same library function its CLI verb uses; there is no parallel
-TUI-only code path. Quitting the TUI (`q`) never kills sessions — it's a
-view, not a supervisor.
+`cortado agent ls`, plus live Herdr session state. `cortado ui` is
+**stateless**: it re-derives everything from the filesystem and `herdr agent
+list` on a 2s tick (and immediately after any action) — nothing is cached,
+so nothing can drift, same principle as the CLI. Every key below calls the
+same library function its CLI verb uses; there is no parallel TUI-only code
+path. Quitting the TUI (`q`) never kills sessions — it's a view, not a
+supervisor. Rail badges show live agent **status** — idle / working /
+blocked — sourced straight from `herdr agent list`, not a session count.
 
 | Key | Action |
 |---|---|
@@ -180,44 +179,23 @@ Sessions tab they navigate the rail (same as `↑/↓`); on the Memory tab they
 move the memory-preview cursor instead, and `↑/↓` navigate the rail. This
 lets you scroll a memory file without leaving the rail's keyboard model.
 
-Left pane is the rail (teams → agents, live session count badged green when
-> 0); right pane has Sessions (name, model, uptime) and Memory (file list +
-scrollable preview) tabs; the status line shows the last action's result or
-error, using the same error text the CLI prints on failure.
+Left pane is the rail (teams → agents, badged by live status — idle
+yellow, working green, blocked red); right pane has Sessions (name, model,
+status) and Memory (file list + scrollable preview) tabs; the status line
+shows the last action's result or error, using the same error text the CLI
+prints on failure.
 
-## Workspace
+## Herdr workspace
 
-With `launcher = "workspace"` (the default), everything lives in **one**
-terminal window: `cortado ui` runs as a slim rail pane inside a
-`cortado_workspace` tmux session, and every opened agent becomes a viewer
-pane beside it, nested-attached to the agent's own tmux session. All tmux
-keys are native — `C-b %` / `C-b "` split, `C-b z` zooms an agent
-full-screen, the mouse resizes panes — and every pane is labeled with its
-agent. Closing a viewer pane (or the whole window) only detaches; agents
-keep running, exactly as before. `cortado open` from any shell lands the
-agent in the workspace, starting it if needed. The old
-one-window-per-agent behavior remains: set `launcher = "ghostty"`.
-
-Every new agent pane takes an **equal share** of the width right of the
-rail — a second agent halves that space, a third splits it three ways —
-and the rail stays pinned at 34 columns. To resize panes yourself:
-
-| Control | Action |
-|---|---|
-| mouse drag on a pane border | resize freely |
-| right-click inside an agent or scratch pane | zoom, split, arrange, or close panes |
-| `C-b H` / `C-b L` | pane 5 columns narrower / wider (repeatable: keep tapping `H`/`L` after one `C-b`) |
-| `C-b J` / `C-b K` | pane 3 rows taller / shorter |
-
-The reminder lives in the workspace status bar: *drag borders · C-b H/L
-resize*. Cortado re-balances widths only when it adds a pane; your manual
-sizes are otherwise left alone.
-
-The right-click pane menu can zoom the selected pane, open a scratch shell
-beside or below it, stack all viewers vertically to the right of the roster,
-restore the side-by-side layout, or close the selected pane. Scratch shells
-start in the selected pane's working directory. None of these actions stop the
-agent session behind a viewer pane.
+Cortado owns one Herdr workspace, labeled **Cortado**: the rail runs as its
+pinned left pane, and every agent `cortado open`s spawns as a pane to the
+rail's right. All layout — splitting, moving, resizing, zooming — is native
+Herdr; cortado does not manage panes and will not fight you over them.
+Closing a pane, a client, or the whole Herdr window never loses anything:
+agents are ephemeral processes running over persistent markdown memory, and
+the durable thing was always the memory, not the pane. `cortado open` just
+materializes an agent on demand — reattach if a session's live, spawn fresh
+with memory loaded if not.
 
 ### Optional Ghostty presentation profile
 
@@ -244,16 +222,23 @@ transparent macOS titlebar. Font family is deliberately not prescribed.
 root = "~/cortado"          # where teams/agents live
 default_runtime = "claude"
 
-[tmux]
-socket = "cortado"          # dedicated server; your personal tmux is untouched
-
-[terminal]
-launcher = "workspace"    # workspace | ghostty | env-terminal | print
-window = "ghostty"        # workspace mode's one OS window: ghostty | env-terminal | print
+[herdr]
+binary = "herdr"            # path or name of the herdr binary
+workspace = "Cortado"       # label of the Herdr workspace cortado owns
 ```
+
+Old `[tmux]`/`[terminal]` sections in an existing config file are retired:
+they still parse (unknown keys are ignored) but produce a one-time nudge on
+`cortado open` telling you to remove them — cortado no longer reads them.
 
 `~/.config/cortado/models.toml` — the model registry. Add a model by adding a
 table; `${keyring:...}` values resolve against OS-keyring-stored keys.
+
+**Test/CI seam:** `CORTADO_HERDR_SESSION=<name>` targets a named, isolated
+Herdr session instead of your default one — used by cortado's own
+integration tests so they never touch a real session. Production code never
+sets it. This sits alongside the existing escape hatches below
+(`CORTADO_KEY_<ACCOUNT>`, `CORTADO_NO_KEYRING`, `CORTADO_BIN_<RUNTIME>`).
 
 ### Provider keys
 
@@ -278,12 +263,14 @@ access altogether; `cortado key set/rm` and any model needing a keyring key
 will fail with a clear error instead of touching the OS keychain.
 
 **Threat model:** a resolved key reaches the agent's session as an
-environment variable (`tmux -e`) and remains in the session's process
-environment for the session's lifetime. Both that environment and the
-momentary argv of the short-lived tmux client are readable only by your own
-user account — never by other users — and cortado never writes the key to a
-file, log, or shell history. Treat any process running in the session as
-able to read the key (that's what it's for).
+environment variable (`herdr agent start --env KEY=VALUE`) and remains in
+the session's process environment for the session's lifetime. Both that
+environment and the momentary argv of the `herdr` CLI invocation are
+readable only by your own user account — never by other users — and cortado
+never writes the key to a file, log, or shell history. Any error text or
+display string that might echo that argv redacts `--env` values. Treat any
+process running in the session as able to read the key (that's what it's
+for).
 
 ## Data layout
 
@@ -317,6 +304,28 @@ a complete migration.
 - **M5 (shipped)** — single-window workspace: `cortado ui` rail + agent
   viewer panes in one tmux client (`launcher = "workspace"`, the new
   default), native tmux keys everywhere, agent sessions untouched.
+- **M6 (in verification)** — Herdr substrate swap: tmux + Ghostty + the
+  workspace session layer replaced by [Herdr](https://herdr.dev). `open` /
+  `sessions` / `kill` / `doctor` / `ui` all drive Herdr through the new
+  `cortado-herdr` crate; `cortado-tmux` and `cortado-term` are gone. Data
+  model and memory model are unchanged. Code-complete and unit/integration
+  green; pending a manual end-to-end pass on macOS with real Herdr + Claude
+  Code before this line reads "shipped".
+
+### Migrating from a tmux-era install
+
+If you're upgrading from M5 or earlier: cortado no longer starts, sees, or
+manages tmux sessions at all. Any agent sessions still running in your old
+`cortado` tmux socket keep running, but `cortado sessions`/`cortado kill`
+can't see them anymore — finish what's in flight the old way, then retire
+the socket:
+
+```bash
+tmux -L cortado kill-server
+```
+
+Your data (`~/cortado`, `models.toml`, keyring entries) is untouched by the
+upgrade; only the session layer changed.
 
 Design docs live in [docs/superpowers/specs](docs/superpowers/specs) and
 [docs/superpowers/plans](docs/superpowers/plans).

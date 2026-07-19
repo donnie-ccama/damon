@@ -4,19 +4,12 @@ use predicates::str::contains;
 struct Env {
     root: tempfile::TempDir,
     cfg: tempfile::TempDir,
-    socket: String,
 }
 
-fn setup(tag: &str) -> Env {
+fn setup(_tag: &str) -> Env {
     let root = tempfile::tempdir().unwrap();
     let cfg = tempfile::tempdir().unwrap();
-    let socket = format!("cortado-test-{tag}-{}", std::process::id());
-    std::fs::write(
-        cfg.path().join("config.toml"),
-        format!("[tmux]\nsocket = \"{socket}\"\n[terminal]\nlauncher = \"print\"\n"),
-    )
-    .unwrap();
-    let e = Env { root, cfg, socket };
+    let e = Env { root, cfg };
     cortado(&e)
         .args(["team", "new", "Newsletter"])
         .assert()
@@ -37,22 +30,16 @@ fn cortado(e: &Env) -> Command {
     cmd
 }
 
-impl Drop for Env {
-    fn drop(&mut self) {
-        std::process::Command::new("tmux")
-            .args(["-L", &self.socket, "kill-server"])
-            .output()
-            .ok();
-    }
-}
-
-// NOTE: `open`'s tmux-era tests that spawn/reattach/kill a session, or that
-// assert on removed tmux launcher behavior, were deleted here (see
-// .superpowers/sdd/task-5-report.md "Fix: cli_open triage" for the full
-// list and reasons). Keeping them would either hit the developer's real
-// default Herdr server (no `CORTADO_HERDR_SESSION` isolation seam existed in
-// this file) or assert on tmux-specific behavior the Herdr rewrite removed.
-// They are superseded by a planned isolated-session CLI round-trip test.
+// NOTE: `open`'s tmux-era tests that spawned/reattached/killed a session, or
+// asserted on removed tmux launcher behavior, were deleted from this file.
+// Under the Herdr rewrite, `open_session` contacts Herdr (`Herdr::new` +
+// `ensure_server()` + `list()`) before most of what those tests exercised —
+// keeping them here would either hit the developer's real default Herdr
+// server (this file has no `CORTADO_HERDR_SESSION` isolation seam) or assert
+// on tmux-specific behavior that no longer exists. Coverage that needs to
+// touch a real (isolated) Herdr server lives in `herdr_cli.rs` instead,
+// where each test owns a named session via `CORTADO_HERDR_SESSION` and
+// cleans it up on drop.
 //
 // `open_rejects_unknown_model` below is the one test in this file that is
 // still fully hermetic under the new `open_session` control flow: model
