@@ -4,7 +4,11 @@ use cortado_herdr::{AgentStatus, Herdr};
 use std::process::Command;
 
 fn herdr_available() -> bool {
-    Command::new("herdr").arg("--version").output().map(|o| o.status.success()).unwrap_or(false)
+    Command::new("herdr")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Starts `herdr --session <name> server` detached; stops + deletes on drop.
@@ -16,7 +20,8 @@ impl IsoSession {
     fn start() -> IsoSession {
         let name = format!("cortadotest{}", std::process::id());
         let h = Herdr::new("herdr".into(), "Cortado".into(), Some(name.clone()));
-        h.ensure_server().expect("isolated herdr server should start");
+        h.ensure_server()
+            .expect("isolated herdr server should start");
         IsoSession { name }
     }
     fn herdr(&self) -> Herdr {
@@ -26,8 +31,14 @@ impl IsoSession {
 
 impl Drop for IsoSession {
     fn drop(&mut self) {
-        Command::new("herdr").args(["session", "stop", &self.name]).output().ok();
-        Command::new("herdr").args(["session", "delete", &self.name]).output().ok();
+        Command::new("herdr")
+            .args(["session", "stop", &self.name])
+            .output()
+            .ok();
+        Command::new("herdr")
+            .args(["session", "delete", &self.name])
+            .output()
+            .ok();
     }
 }
 
@@ -74,11 +85,17 @@ fn full_agent_round_trip() {
     // send + read plumbing (M7 consumers; verify they do not error)
     h.send("cortado_demo_scout_1", "echo hi").unwrap();
     let text = h.read("cortado_demo_scout_1", 50).unwrap();
-    assert!(!text.is_empty(), "agent read returned empty; raw output shape changed?");
+    assert!(
+        !text.is_empty(),
+        "agent read returned empty; raw output shape changed?"
+    );
     // Live-verified: `agent read` result nests text under "read": {"text": "..."}.
     // A weak non-empty check alone would still pass on the raw-JSON fallback
     // path, masking a wrong field name — assert the actual sent text is present.
-    assert!(text.contains("echo hi"), "expected sent text in agent read output, got: {text}");
+    assert!(
+        text.contains("echo hi"),
+        "expected sent text in agent read output, got: {text}"
+    );
 
     // close removes it
     h.close(&live[0].pane_id).unwrap();
@@ -92,13 +109,20 @@ fn server_down_is_typed() {
         eprintln!("skipping: herdr not installed");
         return;
     }
-    let h = Herdr::new("herdr".into(), "Cortado".into(), Some("neverstarted999".into()));
+    let h = Herdr::new(
+        "herdr".into(),
+        "Cortado".into(),
+        Some("neverstarted999".into()),
+    );
     match h.list() {
         Err(cortado_herdr::HerdrError::ServerDown(_)) => {}
         other => panic!("expected ServerDown, got {other:?}"),
     }
     // Clean up the session dir herdr may have scaffolded for the name probe.
-    Command::new("herdr").args(["session", "delete", "neverstarted999"]).output().ok();
+    Command::new("herdr")
+        .args(["session", "delete", "neverstarted999"])
+        .output()
+        .ok();
 }
 
 #[test]

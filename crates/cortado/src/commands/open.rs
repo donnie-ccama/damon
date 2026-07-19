@@ -82,7 +82,8 @@ pub fn open_session(
     let mine: Vec<&cortado_herdr::AgentInfo> = live
         .iter()
         .filter(|a| {
-            SessionName::parse(&a.name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+            SessionName::parse(&a.name)
+                .is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         })
         .collect();
 

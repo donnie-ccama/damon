@@ -44,9 +44,13 @@ pub fn kill_agent(reference: &str) -> anyhow::Result<KillOutcome> {
     let h = herdr(&config);
     let store = Store::new(config.root()?);
     let entry = store.resolve(reference)?;
-    let mut out = KillOutcome { killed: Vec::new(), failed: Vec::new() };
+    let mut out = KillOutcome {
+        killed: Vec::new(),
+        failed: Vec::new(),
+    };
     for a in h.list()? {
-        if SessionName::parse(&a.name).is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
+        if SessionName::parse(&a.name)
+            .is_some_and(|n| n.team == entry.team && n.agent == entry.slug)
         {
             match h.close(&a.pane_id) {
                 Ok(()) => out.killed.push(a.name),

@@ -109,11 +109,18 @@ fn check_herdr() -> CheckResult {
             } else {
                 format!("({ma}.{mi}, server not running — starts on `cortado open`)")
             };
-            CheckResult { name: "herdr", status: CheckStatus::Ok(detail), hint: None }
+            CheckResult {
+                name: "herdr",
+                status: CheckStatus::Ok(detail),
+                hint: None,
+            }
         }
         Some(found) => CheckResult {
             name: "herdr",
-            status: CheckStatus::TooOld { found, need: (0, 7) },
+            status: CheckStatus::TooOld {
+                found,
+                need: (0, 7),
+            },
             hint: Some(hint("herdr")),
         },
         None => CheckResult {

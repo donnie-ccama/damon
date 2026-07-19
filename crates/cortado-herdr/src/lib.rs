@@ -146,7 +146,9 @@ pub fn parse_started_agent(result: &serde_json::Value) -> Result<AgentInfo, Herd
 }
 
 /// `(workspace_id, label)` pairs from a `workspace_list` result.
-pub fn parse_workspace_list(result: &serde_json::Value) -> Result<Vec<(String, String)>, HerdrError> {
+pub fn parse_workspace_list(
+    result: &serde_json::Value,
+) -> Result<Vec<(String, String)>, HerdrError> {
     let arr = result["workspaces"]
         .as_array()
         .ok_or_else(|| HerdrError::Parse("workspace_list without workspaces array".into()))?;
@@ -190,7 +192,11 @@ pub struct Herdr {
 
 impl Herdr {
     pub fn new(binary: String, workspace_label: String, session: Option<String>) -> Herdr {
-        Herdr { binary, workspace_label, session }
+        Herdr {
+            binary,
+            workspace_label,
+            session,
+        }
     }
 
     pub fn workspace_label(&self) -> &str {
@@ -219,21 +225,33 @@ impl Herdr {
     }
 
     pub fn send_args(&self, name: &str, text: &str) -> Vec<String> {
-        self.with_session(vec!["agent".into(), "send".into(), name.into(), text.into()])
+        self.with_session(vec![
+            "agent".into(),
+            "send".into(),
+            name.into(),
+            text.into(),
+        ])
     }
 
     pub fn read_args(&self, name: &str, lines: u32) -> Vec<String> {
         self.with_session(vec![
-            "agent".into(), "read".into(), name.into(),
-            "--lines".into(), lines.to_string(),
+            "agent".into(),
+            "read".into(),
+            name.into(),
+            "--lines".into(),
+            lines.to_string(),
         ])
     }
 
     pub fn wait_status_args(&self, name: &str, status: &str, timeout_ms: u64) -> Vec<String> {
         self.with_session(vec![
-            "agent".into(), "wait".into(), name.into(),
-            "--status".into(), status.into(),
-            "--timeout".into(), timeout_ms.to_string(),
+            "agent".into(),
+            "wait".into(),
+            name.into(),
+            "--status".into(),
+            status.into(),
+            "--timeout".into(),
+            timeout_ms.to_string(),
         ])
     }
 
@@ -243,8 +261,10 @@ impl Herdr {
 
     pub fn workspace_create_args(&self) -> Vec<String> {
         self.with_session(vec![
-            "workspace".into(), "create".into(),
-            "--label".into(), self.workspace_label.clone(),
+            "workspace".into(),
+            "create".into(),
+            "--label".into(),
+            self.workspace_label.clone(),
         ])
     }
 
@@ -273,12 +293,21 @@ impl Herdr {
         focus: bool,
     ) -> Vec<String> {
         let mut args: Vec<String> = vec![
-            "agent".into(), "start".into(), name.into(),
-            "--cwd".into(), cwd.to_string_lossy().into_owned(),
-            "--workspace".into(), workspace_id.into(),
-            "--split".into(), "right".into(),
+            "agent".into(),
+            "start".into(),
+            name.into(),
+            "--cwd".into(),
+            cwd.to_string_lossy().into_owned(),
+            "--workspace".into(),
+            workspace_id.into(),
+            "--split".into(),
+            "right".into(),
         ];
-        args.push(if focus { "--focus".into() } else { "--no-focus".into() });
+        args.push(if focus {
+            "--focus".into()
+        } else {
+            "--no-focus".into()
+        });
         for (k, v) in env {
             args.push("--env".into());
             args.push(format!("{k}={v}"));
@@ -291,16 +320,19 @@ impl Herdr {
     }
 
     fn run(&self, args: &[String]) -> Result<serde_json::Value, HerdrError> {
-        let out = Command::new(&self.binary).args(args).output().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                HerdrError::NotInstalled
-            } else {
-                HerdrError::Failed {
-                    args: display_args(args),
-                    stderr: e.to_string(),
+        let out = Command::new(&self.binary)
+            .args(args)
+            .output()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    HerdrError::NotInstalled
+                } else {
+                    HerdrError::Failed {
+                        args: display_args(args),
+                        stderr: e.to_string(),
+                    }
                 }
-            }
-        })?;
+            })?;
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         let stderr = redact_values(args, &stderr);
@@ -316,23 +348,33 @@ impl Herdr {
                 };
             }
             // No socket → the server for this session is not running.
-            if stderr.contains("No such file or directory") || stderr.contains("Connection refused") {
+            if stderr.contains("No such file or directory") || stderr.contains("Connection refused")
+            {
                 return Err(HerdrError::ServerDown(stderr));
             }
-            return Err(HerdrError::Failed { args: display_args(args), stderr });
+            return Err(HerdrError::Failed {
+                args: display_args(args),
+                stderr,
+            });
         }
         parse_envelope(&stdout)
     }
 
     /// Plain-text commands (`status server`); success text returned as-is.
     fn run_text(&self, args: &[String]) -> Result<String, HerdrError> {
-        let out = Command::new(&self.binary).args(args).output().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                HerdrError::NotInstalled
-            } else {
-                HerdrError::Failed { args: display_args(args), stderr: e.to_string() }
-            }
-        })?;
+        let out = Command::new(&self.binary)
+            .args(args)
+            .output()
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    HerdrError::NotInstalled
+                } else {
+                    HerdrError::Failed {
+                        args: display_args(args),
+                        stderr: e.to_string(),
+                    }
+                }
+            })?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
             let stderr = redact_values(args, &stderr);
@@ -393,7 +435,14 @@ impl Herdr {
         workspace_id: &str,
         focus: bool,
     ) -> Result<AgentInfo, HerdrError> {
-        parse_started_agent(&self.run(&self.start_args(name, cwd, env, command, workspace_id, focus))?)
+        parse_started_agent(&self.run(&self.start_args(
+            name,
+            cwd,
+            env,
+            command,
+            workspace_id,
+            focus,
+        ))?)
     }
 
     pub fn list(&self) -> Result<Vec<AgentInfo>, HerdrError> {
@@ -426,7 +475,8 @@ impl Herdr {
     }
 
     pub fn wait_status(&self, name: &str, status: &str, timeout_ms: u64) -> Result<(), HerdrError> {
-        self.run(&self.wait_status_args(name, status, timeout_ms)).map(|_| ())
+        self.run(&self.wait_status_args(name, status, timeout_ms))
+            .map(|_| ())
     }
 }
 
@@ -465,7 +515,10 @@ mod tests {
 
     #[test]
     fn envelope_rejects_garbage() {
-        assert!(matches!(parse_envelope("not json"), Err(HerdrError::Parse(_))));
+        assert!(matches!(
+            parse_envelope("not json"),
+            Err(HerdrError::Parse(_))
+        ));
     }
 
     #[test]
@@ -533,9 +586,20 @@ mod tests {
         assert_eq!(
             args,
             vec![
-                "agent", "start", "cortado_demo_scout_1", "--cwd", "/tmp/wt",
-                "--workspace", "w2", "--split", "right", "--focus",
-                "--env", "CORTADO_TEAM=demo", "--", "claude"
+                "agent",
+                "start",
+                "cortado_demo_scout_1",
+                "--cwd",
+                "/tmp/wt",
+                "--workspace",
+                "w2",
+                "--split",
+                "right",
+                "--focus",
+                "--env",
+                "CORTADO_TEAM=demo",
+                "--",
+                "claude"
             ]
         );
     }
@@ -543,9 +607,15 @@ mod tests {
     #[test]
     fn session_flag_appends_to_cli_args_only() {
         assert_eq!(h().list_args(), vec!["agent", "list"]);
-        assert_eq!(h_sess().list_args(), vec!["agent", "list", "--session", "t1"]);
+        assert_eq!(
+            h_sess().list_args(),
+            vec!["agent", "list", "--session", "t1"]
+        );
         // Launch form puts --session BEFORE `server` (verified herdr behavior).
-        assert_eq!(h_sess().server_launch_args(), vec!["--session", "t1", "server"]);
+        assert_eq!(
+            h_sess().server_launch_args(),
+            vec!["--session", "t1", "server"]
+        );
         assert_eq!(h().server_launch_args(), vec!["server"]);
     }
 
@@ -553,7 +623,12 @@ mod tests {
     fn start_args_session_precedes_double_dash() {
         let env = std::collections::BTreeMap::new();
         let args = h_sess().start_args(
-            "n", std::path::Path::new("/w"), &env, &["sh".to_string()], "w1", false,
+            "n",
+            std::path::Path::new("/w"),
+            &env,
+            &["sh".to_string()],
+            "w1",
+            false,
         );
         let dd = args.iter().position(|a| a == "--").unwrap();
         let sess = args.iter().position(|a| a == "--session").unwrap();
@@ -564,8 +639,11 @@ mod tests {
     #[test]
     fn env_values_redacted_in_display() {
         let shown = display_args(&[
-            "agent".into(), "start".into(), "x".into(),
-            "--env".into(), "OPENROUTER_API_KEY=sk-secret".into(),
+            "agent".into(),
+            "start".into(),
+            "x".into(),
+            "--env".into(),
+            "OPENROUTER_API_KEY=sk-secret".into(),
         ]);
         assert!(shown.contains("OPENROUTER_API_KEY=***"));
         assert!(!shown.contains("sk-secret"));
@@ -584,11 +662,16 @@ mod tests {
     #[test]
     fn stderr_redaction_masks_long_env_values_only() {
         let args: Vec<String> = vec![
-            "agent".into(), "start".into(), "x".into(),
-            "--env".into(), "OPENROUTER_API_KEY=sk-verylongsecret123".into(),
-            "--env".into(), "CORTADO_TEAM=demo".into(),
+            "agent".into(),
+            "start".into(),
+            "x".into(),
+            "--env".into(),
+            "OPENROUTER_API_KEY=sk-verylongsecret123".into(),
+            "--env".into(),
+            "CORTADO_TEAM=demo".into(),
         ];
-        let text = "bad invocation: --env OPENROUTER_API_KEY=sk-verylongsecret123 in cortado_demo_scout_1";
+        let text =
+            "bad invocation: --env OPENROUTER_API_KEY=sk-verylongsecret123 in cortado_demo_scout_1";
         let red = redact_values(&args, text);
         assert!(!red.contains("sk-verylongsecret123"));
         assert!(red.contains("OPENROUTER_API_KEY=***"));

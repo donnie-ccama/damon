@@ -35,7 +35,10 @@ pub struct HerdrCfg {
 
 impl Default for HerdrCfg {
     fn default() -> Self {
-        HerdrCfg { binary: "herdr".into(), workspace: "Cortado".into() }
+        HerdrCfg {
+            binary: "herdr".into(),
+            workspace: "Cortado".into(),
+        }
     }
 }
 
@@ -86,16 +89,25 @@ impl Config {
 
     /// Test seam: target a named herdr session (isolated socket).
     pub fn herdr_session() -> Option<String> {
-        std::env::var("CORTADO_HERDR_SESSION").ok().filter(|s| !s.is_empty())
+        std::env::var("CORTADO_HERDR_SESSION")
+            .ok()
+            .filter(|s| !s.is_empty())
     }
 }
 
 /// Retired config sections present in the file at `path` (best-effort:
 /// unreadable/invalid files report nothing — load() owns real errors).
 pub fn obsolete_sections(path: &Path) -> Vec<&'static str> {
-    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
-    let Ok(v) = text.parse::<toml::Table>() else { return Vec::new() };
-    ["tmux", "terminal"].into_iter().filter(|s| v.contains_key(*s)).collect()
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(v) = text.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+    ["tmux", "terminal"]
+        .into_iter()
+        .filter(|s| v.contains_key(*s))
+        .collect()
 }
 
 pub(crate) fn load_toml_or_default<T: serde::de::DeserializeOwned + Default>(

@@ -12,16 +12,24 @@ pub fn models_for(store: &Store, names: &[String]) -> BTreeMap<String, String> {
     for name in names {
         if let Some(parsed) = SessionName::parse(name) {
             wanted
-                .entry(store.logs_dir(&parsed.team, &parsed.agent).join("sessions.jsonl"))
+                .entry(
+                    store
+                        .logs_dir(&parsed.team, &parsed.agent)
+                        .join("sessions.jsonl"),
+                )
                 .or_default()
                 .push(name);
         }
     }
     let mut out = BTreeMap::new();
     for (path, session_names) in wanted {
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
         for line in text.lines() {
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
             if v["event"] != "spawn" {
                 continue;
             }
