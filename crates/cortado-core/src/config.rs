@@ -5,10 +5,6 @@ use std::path::{Path, PathBuf};
 #[serde(default)]
 pub struct Config {
     pub general: General,
-    /// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
-    pub tmux: TmuxCfg,
-    /// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
-    pub terminal: TerminalCfg,
     pub herdr: HerdrCfg,
 }
 
@@ -26,56 +22,6 @@ impl Default for General {
             default_runtime: "claude".into(),
         }
     }
-}
-
-/// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct TmuxCfg {
-    pub socket: String,
-}
-
-impl Default for TmuxCfg {
-    fn default() -> Self {
-        TmuxCfg {
-            socket: "cortado".into(),
-        }
-    }
-}
-
-/// Obsolete since the Herdr substrate swap — removed when cortado-tmux/cortado-term are deleted.
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct TerminalCfg {
-    pub launcher: Launcher,
-    /// How workspace mode opens its one OS window. Ignored by other launchers.
-    pub window: Window,
-}
-
-impl Default for TerminalCfg {
-    fn default() -> Self {
-        TerminalCfg {
-            launcher: Launcher::Workspace,
-            window: Window::Ghostty,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Launcher {
-    Workspace,
-    Ghostty,
-    EnvTerminal,
-    Print,
-}
-
-#[derive(Debug, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Window {
-    Ghostty,
-    EnvTerminal,
-    Print,
 }
 
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -177,23 +123,8 @@ mod tests {
         let c = Config::default();
         assert_eq!(c.general.root, "~/cortado");
         assert_eq!(c.general.default_runtime, "claude");
-        assert_eq!(c.tmux.socket, "cortado");
-        assert_eq!(c.terminal.launcher, Launcher::Workspace);
-        assert_eq!(c.terminal.window, Window::Ghostty);
         assert_eq!(c.herdr.binary, "herdr");
         assert_eq!(c.herdr.workspace, "Cortado");
-    }
-
-    #[test]
-    fn workspace_launcher_and_window_parse() {
-        let c: Config =
-            toml::from_str("[terminal]\nlauncher = \"workspace\"\nwindow = \"print\"\n").unwrap();
-        assert_eq!(c.terminal.launcher, Launcher::Workspace);
-        assert_eq!(c.terminal.window, Window::Print);
-        // Old configs without `window` still parse.
-        let c: Config = toml::from_str("[terminal]\nlauncher = \"ghostty\"\n").unwrap();
-        assert_eq!(c.terminal.launcher, Launcher::Ghostty);
-        assert_eq!(c.terminal.window, Window::Ghostty);
     }
 
     #[test]
@@ -225,9 +156,9 @@ mod tests {
 
     #[test]
     fn partial_file_fills_defaults() {
-        let c: Config = toml::from_str("[terminal]\nlauncher = \"print\"\n").unwrap();
-        assert_eq!(c.terminal.launcher, Launcher::Print);
-        assert_eq!(c.tmux.socket, "cortado");
+        let c: Config = toml::from_str("[herdr]\nworkspace = \"X\"\n").unwrap();
+        assert_eq!(c.herdr.workspace, "X");
+        assert_eq!(c.herdr.binary, "herdr");
     }
 
     #[test]

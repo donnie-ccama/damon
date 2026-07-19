@@ -4,8 +4,6 @@ members = [
   "crates/cortado-core",
   "crates/cortado-git",
   "crates/cortado-herdr",
-  "crates/cortado-tmux",
-  "crates/cortado-term",
   "crates/cortado",
 ]
 
@@ -35,5 +33,3 @@ fs4 = "0.13"
 cortado-core = { path = "crates/cortado-core" }
 cortado-git = { path = "crates/cortado-git" }
 cortado-herdr = { path = "crates/cortado-herdr" }
-cortado-tmux = { path = "crates/cortado-tmux" }
-cortado-term = { path = "crates/cortado-term" }

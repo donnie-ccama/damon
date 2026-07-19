@@ -542,8 +542,7 @@ dependencies = [
  "clap",
  "cortado-core",
  "cortado-git",
- "cortado-term",
- "cortado-tmux",
+ "cortado-herdr",
  "image",
  "keyring",
  "predicates",
@@ -583,25 +582,6 @@ name = "cortado-herdr"
 version = "0.2.0"
 dependencies = [
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "cortado-term"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "cortado-core",
- "cortado-tmux",
- "tempfile",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "cortado-tmux"
-version = "0.2.0"
-dependencies = [
- "tempfile",
  "thiserror 2.0.18",
 ]
 
