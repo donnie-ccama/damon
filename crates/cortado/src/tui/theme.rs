@@ -69,9 +69,6 @@ pub fn badge() -> Style {
 pub fn model_col() -> Style {
     Style::default().fg(LAVENDER)
 }
-pub fn uptime_col() -> Style {
-    Style::default().fg(MUTED)
-}
 pub fn invalid() -> Style {
     Style::default().fg(ROSE).add_modifier(Modifier::BOLD)
 }

@@ -4,13 +4,14 @@ use cortado_core::session_name::SessionName;
 use cortado_core::slug::Slug;
 use cortado_core::store::{Store, StrayDir};
 use cortado_core::CoreError;
-use cortado_tmux::Tmux;
+use cortado_herdr::{Herdr, HerdrError};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct LiveSession {
     pub name: String,
-    pub created_unix: i64,
+    pub status: cortado_herdr::AgentStatus,
+    pub pane_id: String,
     pub model: Option<String>,
 }
 
@@ -18,7 +19,13 @@ pub struct LiveSession {
 pub struct SessionRow {
     pub name: String,
     pub n: u32,
-    pub created_unix: i64,
+    pub status: cortado_herdr::AgentStatus,
+    /// Herdr's pane identity for this session. Not read by the TUI today —
+    /// this task removed pane management — but carried through 1:1 from
+    /// `cortado_herdr::AgentInfo` so a future per-pane action doesn't need
+    /// to re-plumb the snapshot layer.
+    #[allow(dead_code)]
+    pub pane_id: String,
     pub model: String,
 }
 
@@ -81,7 +88,8 @@ impl Snapshot {
                         (parsed.team == a.team && parsed.agent == a.slug).then(|| SessionRow {
                             name: s.name.clone(),
                             n: parsed.n,
-                            created_unix: s.created_unix,
+                            status: s.status,
+                            pane_id: s.pane_id.clone(),
                             model: s.model.clone().unwrap_or_else(|| "?".into()),
                         })
                     })
@@ -132,16 +140,19 @@ impl Snapshot {
     }
 }
 
-/// One LiveSession per tmux session. The model comes from the single
-/// list_info call (`@cortado_model` user option) — no per-session tmux call.
-pub fn live_sessions(tmux: &Tmux) -> Result<Vec<LiveSession>, cortado_tmux::TmuxError> {
-    Ok(tmux
-        .list_info()?
+/// One LiveSession per herdr-started cortado agent; model joined from the
+/// append-only spawn log (sessions.jsonl) — no live store to drift.
+pub fn live_sessions(herdr: &Herdr, store: &Store) -> Result<Vec<LiveSession>, HerdrError> {
+    let live = herdr.list()?;
+    let names: Vec<String> = live.iter().map(|a| a.name.clone()).collect();
+    let mut models = cortado_core::session_log::models_for(store, &names);
+    Ok(live
         .into_iter()
-        .map(|info| LiveSession {
-            name: info.name,
-            created_unix: info.created_unix,
-            model: info.model,
+        .map(|a| LiveSession {
+            model: models.remove(&a.name),
+            name: a.name,
+            status: a.status,
+            pane_id: a.pane_id,
         })
         .collect())
 }
@@ -212,22 +223,26 @@ mod tests {
         let live = vec![
             LiveSession {
                 name: "cortado_newsletter_scout_2".into(),
-                created_unix: 100,
+                status: cortado_herdr::AgentStatus::Working,
+                pane_id: "w1:p2".into(),
                 model: Some("kimi".into()),
             },
             LiveSession {
                 name: "cortado_newsletter_scout_1".into(),
-                created_unix: 50,
+                status: cortado_herdr::AgentStatus::Idle,
+                pane_id: "w1:p1".into(),
                 model: None,
             },
             LiveSession {
                 name: "cortado_other_agent_1".into(),
-                created_unix: 10,
+                status: cortado_herdr::AgentStatus::Unknown,
+                pane_id: "w2:p1".into(),
                 model: None,
             },
             LiveSession {
                 name: "not_a_cortado_session".into(),
-                created_unix: 10,
+                status: cortado_herdr::AgentStatus::Unknown,
+                pane_id: "w3:p1".into(),
                 model: None,
             },
         ];
@@ -240,6 +255,10 @@ mod tests {
         assert_eq!(agent.sessions[0].n, 1);
         assert_eq!(agent.sessions[0].model, "?");
         assert_eq!(agent.sessions[1].model, "kimi");
+        assert_eq!(
+            agent.sessions[1].status,
+            cortado_herdr::AgentStatus::Working
+        );
     }
 
     #[test]
@@ -276,36 +295,74 @@ mod tests {
         assert!(broken.display.is_err());
     }
 
-    struct SocketGuard(cortado_tmux::Tmux);
-    impl Drop for SocketGuard {
+    fn herdr_available() -> bool {
+        std::process::Command::new("herdr")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Starts `herdr --session <name> server` detached; stops + deletes on
+    /// drop. Never touches the developer's default herdr session — copied
+    /// from the `cortado-herdr` live-test pattern (Task 2).
+    struct IsoSession {
+        name: String,
+    }
+
+    impl IsoSession {
+        fn start() -> IsoSession {
+            let name = format!("cortadotui{}", std::process::id());
+            let h = Herdr::new("herdr".into(), "Cortado".into(), Some(name.clone()));
+            h.ensure_server()
+                .expect("isolated herdr server should start");
+            IsoSession { name }
+        }
+        fn herdr(&self) -> Herdr {
+            Herdr::new("herdr".into(), "Cortado".into(), Some(self.name.clone()))
+        }
+    }
+
+    impl Drop for IsoSession {
         fn drop(&mut self) {
-            self.0.kill_server().ok();
+            std::process::Command::new("herdr")
+                .args(["session", "stop", &self.name])
+                .output()
+                .ok();
+            std::process::Command::new("herdr")
+                .args(["session", "delete", &self.name])
+                .output()
+                .ok();
         }
     }
 
     #[test]
-    fn builds_from_a_real_tmux_server() {
+    fn builds_from_a_real_herdr_server() {
+        if !herdr_available() {
+            eprintln!("skipping: herdr not installed");
+            return;
+        }
         let (_tmp, store) = fixture();
-        let tmux = cortado_tmux::Tmux::new(format!("cortado-test-tui-{}", std::process::id()));
-        let guard = SocketGuard(tmux);
-        let tmux = &guard.0;
-        let mut env = std::collections::BTreeMap::new();
-        env.insert("CORTADO_MODEL".to_string(), "claude".to_string());
-        tmux.spawn(
+        let iso = IsoSession::start();
+        let h = iso.herdr();
+        let ws = h.ensure_workspace().unwrap();
+        let env = std::collections::BTreeMap::new();
+        h.start(
             "cortado_newsletter_scout_1",
             std::path::Path::new("/tmp"),
             &env,
-            &["sleep".to_string(), "30".to_string()],
+            &["sh".to_string(), "-c".to_string(), "sleep 30".to_string()],
+            &ws,
+            false,
         )
         .unwrap();
-        tmux.set_option("cortado_newsletter_scout_1", "@cortado_model", "claude")
-            .unwrap();
 
-        let live = live_sessions(tmux).unwrap();
+        let live = live_sessions(&h, &store).unwrap();
         let snap = Snapshot::build(&store, &live, &ModelsFile::default()).unwrap();
         let agent = snap.agent(&s("newsletter"), &s("scout")).unwrap();
+        // No sessions.jsonl entry exists for this agent — model is unknown,
+        // rendered "?" by the view.
         assert_eq!(agent.sessions.len(), 1);
-        assert_eq!(agent.sessions[0].model, "claude");
-        assert!(agent.sessions[0].created_unix > 1_500_000_000);
+        assert_eq!(agent.sessions[0].model, "?");
     }
 }

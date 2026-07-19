@@ -549,7 +549,8 @@ mod tests {
             .push(crate::tui::snapshot::SessionRow {
                 name: "cortado_newsletter_scout_1".into(),
                 n: 1,
-                created_unix: 0,
+                status: cortado_herdr::AgentStatus::Working,
+                pane_id: "w1:p1".into(),
                 model: "claude".into(),
             });
         let mut m = Model::default();

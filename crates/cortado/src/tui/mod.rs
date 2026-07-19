@@ -1,5 +1,5 @@
 //! `cortado ui` — stateless ratatui TUI. Every tick and every action re-derives
-//! the world from the filesystem and tmux; the Model holds only UI state.
+//! the world from the filesystem and Herdr; the Model holds only UI state.
 pub mod app;
 pub mod event;
 pub mod popup;
@@ -11,7 +11,7 @@ use app::{Action, Event, Model, Preview};
 use cortado_core::config::Config;
 use cortado_core::models::ModelsFile;
 use cortado_core::store::Store;
-use cortado_tmux::Tmux;
+use cortado_herdr::Herdr;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -23,68 +23,39 @@ use std::io::IsTerminal;
 use std::time::Duration;
 
 pub fn run() -> anyhow::Result<()> {
+    crate::commands::open::warn_obsolete_config();
     let config = Config::load()?;
-    if should_bootstrap(
-        &config,
-        std::env::var_os("CORTADO_WORKSPACE").is_some(),
-        std::env::var_os("TMUX").is_some(),
-    ) {
-        return bootstrap_workspace(&config);
-    }
     if !std::io::stdout().is_terminal() {
         anyhow::bail!("cortado ui needs an interactive terminal");
     }
+    let herdr = Herdr::new(
+        config.herdr.binary.clone(),
+        config.herdr.workspace.clone(),
+        Config::herdr_session(),
+    );
     // ratatui::init() enables raw mode + alternate screen and installs a
     // panic hook that restores the terminal.
     let terminal = ratatui::init();
-    let result = event_loop(terminal, &config);
+    let result = event_loop(terminal, &config, &herdr);
     ratatui::restore();
     result
 }
 
-/// Workspace mode, invoked from a plain shell: become the workspace instead
-/// of drawing the rail inline. Inside the workspace pane (CORTADO_WORKSPACE)
-/// or any tmux ($TMUX) we draw the rail directly.
-fn should_bootstrap(config: &Config, in_workspace_pane: bool, in_tmux: bool) -> bool {
-    config.terminal.launcher == cortado_core::config::Launcher::Workspace
-        && !in_workspace_pane
-        && !in_tmux
-}
-
-fn bootstrap_workspace(config: &Config) -> anyhow::Result<()> {
-    let tmux = Tmux::new(config.tmux.socket.clone());
-    let rail = vec![
-        std::env::current_exe()?.display().to_string(),
-        "ui".to_string(),
-    ];
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-    cortado_term::workspace::ensure_workspace(&tmux, std::path::Path::new(&home), &rail)?;
-    cortado_term::open_window(
-        config.terminal.window,
-        &config.tmux.socket,
-        cortado_term::workspace::WORKSPACE_SESSION,
-    )?;
-    println!("workspace {}", cortado_term::workspace::WORKSPACE_SESSION);
-    Ok(())
-}
-
-fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow::Result<()> {
+fn event_loop(
+    mut terminal: ratatui::DefaultTerminal,
+    config: &Config,
+    herdr: &Herdr,
+) -> anyhow::Result<()> {
     let mut model = Model::default();
     let mut logo = view::LogoState::new();
-    let mut world = load_world(config);
+    let mut world = load_world(config, herdr);
     loop {
-        // The workspace process can start detached and survive several
-        // terminal windows. Refresh between event reads so a newly attached
-        // client supplies the right cell metrics for the logo.
+        // Herdr's workspace can be attached from several terminal windows.
+        // Refresh between event reads so a newly attached client supplies
+        // the right cell metrics for the logo.
         logo.refresh();
         terminal.draw(|f| match &world {
-            Ok(snap) => view::render_with_logo(
-                f,
-                &model,
-                snap,
-                chrono::Utc::now().timestamp(),
-                logo.image_mut(),
-            ),
+            Ok(snap) => view::render_with_logo(f, &model, snap, logo.image_mut()),
             Err(msg) => view::render_error(f, msg),
         })?;
         let ev = event::next(Duration::from_secs(2))?;
@@ -98,8 +69,8 @@ fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow
                                 crate::commands::memory::spawn_editor(&path)
                             });
                             // A direct terminal may discard graphics when the
-                            // alternate screen changes; tmux clients may also
-                            // have changed while the editor was open.
+                            // alternate screen changes; the attached client
+                            // may also have changed while the editor was open.
                             logo.invalidate();
                             let status = match result {
                                 Ok(Ok(s)) if s.success() => {
@@ -138,17 +109,16 @@ fn event_loop(mut terminal: ratatui::DefaultTerminal, config: &Config) -> anyhow
             }
         }
         if refresh {
-            world = load_world(config);
+            world = load_world(config, herdr);
         }
     }
 }
 
-/// The whole world, from scratch: Store + tmux + models.toml.
-fn load_world(config: &Config) -> Result<Snapshot, String> {
+/// The whole world, from scratch: Store + Herdr + models.toml.
+fn load_world(config: &Config, herdr: &Herdr) -> Result<Snapshot, String> {
     let inner = || -> anyhow::Result<Snapshot> {
         let store = Store::new(config.root()?);
-        let tmux = Tmux::new(config.tmux.socket.clone());
-        let live = snapshot::live_sessions(&tmux)?;
+        let live = snapshot::live_sessions(herdr, &store)?;
         let models = ModelsFile::load()?;
         Ok(Snapshot::build(&store, &live, &models)?)
     };
@@ -240,23 +210,4 @@ fn execute_action(action: Action, m: &mut Model) -> bool {
         Action::Edit { .. } => {} // handled in event_loop before execute_action
     }
     false
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use cortado_core::config::Launcher;
-
-    #[test]
-    fn bootstraps_only_outside_workspace_and_tmux_in_workspace_mode() {
-        let ws = |l: Launcher| {
-            let mut c = Config::default();
-            c.terminal.launcher = l;
-            c
-        };
-        assert!(should_bootstrap(&ws(Launcher::Workspace), false, false));
-        assert!(!should_bootstrap(&ws(Launcher::Workspace), true, false)); // already the rail
-        assert!(!should_bootstrap(&ws(Launcher::Workspace), false, true)); // user is in tmux
-        assert!(!should_bootstrap(&ws(Launcher::Ghostty), false, false)); // legacy mode
-    }
 }

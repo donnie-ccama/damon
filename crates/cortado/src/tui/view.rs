@@ -1,9 +1,11 @@
-//! Pure rendering: (Model, Snapshot, now) -> one frame. No IO, no mutation.
+//! Pure rendering: (Model, Snapshot) -> one frame. No IO, no mutation.
 use crate::tui::app::{Model, RailSel, Tab};
 use crate::tui::popup::{FormFocus, NewAgentForm, Popup, RepoChoice};
 use crate::tui::snapshot::{AgentRow, Snapshot};
 use crate::tui::theme;
+use cortado_herdr::AgentStatus;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table, Tabs, Wrap,
@@ -189,24 +191,18 @@ fn load_logo(client: Option<&TmuxClient>) -> Option<LogoImage> {
 }
 
 #[cfg(test)]
-pub fn render(f: &mut Frame, m: &Model, snap: &Snapshot, now_unix: i64) {
-    render_with_logo(f, m, snap, now_unix, None);
+pub fn render(f: &mut Frame, m: &Model, snap: &Snapshot) {
+    render_with_logo(f, m, snap, None);
 }
 
-pub fn render_with_logo(
-    f: &mut Frame,
-    m: &Model,
-    snap: &Snapshot,
-    now_unix: i64,
-    logo: Option<&mut LogoImage>,
-) {
+pub fn render_with_logo(f: &mut Frame, m: &Model, snap: &Snapshot, logo: Option<&mut LogoImage>) {
     let [main, status] =
         Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(f.area());
     let rail_width = if f.area().width >= 100 { 34 } else { 30 };
     let [rail, right] =
         Layout::horizontal([Constraint::Length(rail_width), Constraint::Min(0)]).areas(main);
     render_rail(f, rail, m, snap, logo);
-    render_right(f, right, m, snap, now_unix);
+    render_right(f, right, m, snap);
     render_status(f, status, m);
     if let Some(p) = &m.popup {
         render_popup(f, p);
@@ -273,7 +269,9 @@ fn render_rail(
                     if !a.sessions.is_empty() {
                         spans.push(Span::styled(
                             format!("  {} live", a.sessions.len()),
-                            theme::badge(),
+                            Style::default()
+                                .fg(badge_style(&a.sessions))
+                                .add_modifier(Modifier::BOLD),
                         ));
                     }
                     Line::from(spans)
@@ -378,7 +376,7 @@ fn selected(item: ListItem<'_>, on: bool) -> ListItem<'_> {
     }
 }
 
-fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot, now_unix: i64) {
+fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
     let [identity, bar, content] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(1),
@@ -399,7 +397,7 @@ fn render_right(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot, now_unix:
     );
     let agent = m.selected_agent(snap);
     match m.tab {
-        Tab::Sessions => render_sessions(f, content, agent, now_unix),
+        Tab::Sessions => render_sessions(f, content, agent),
         Tab::Memory => render_memory(f, content, m, agent),
     }
 }
@@ -472,7 +470,7 @@ fn render_identity(f: &mut Frame, area: Rect, m: &Model, snap: &Snapshot) {
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix: i64) {
+fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border())
@@ -508,8 +506,8 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
                 Cell::from(s.name.clone()),
                 Cell::from(Span::styled(s.model.clone(), theme::model_col())),
                 Cell::from(Span::styled(
-                    fmt_uptime(now_unix - s.created_unix),
-                    theme::uptime_col(),
+                    s.status.to_string(),
+                    Style::default().fg(badge_style(std::slice::from_ref(s))),
                 )),
             ])
         })
@@ -524,7 +522,7 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
             ],
         )
         .header(
-            Row::new(vec!["SESSION", "MODEL", "UPTIME"])
+            Row::new(vec!["SESSION", "MODEL", "STATUS"])
                 .style(theme::header())
                 .bottom_margin(1),
         )
@@ -532,6 +530,22 @@ fn render_sessions(f: &mut Frame, area: Rect, agent: Option<&AgentRow>, now_unix
         .block(block),
         area,
     );
+}
+
+/// Badge color for an agent's session set: any blocked → red, else any
+/// working → green, else any idle → yellow, else dim. Used both for the
+/// rail's aggregate live-count badge and per-row in the sessions table.
+pub(crate) fn badge_style(sessions: &[crate::tui::snapshot::SessionRow]) -> ratatui::style::Color {
+    use ratatui::style::Color;
+    if sessions.iter().any(|s| s.status == AgentStatus::Blocked) {
+        Color::Red
+    } else if sessions.iter().any(|s| s.status == AgentStatus::Working) {
+        Color::Green
+    } else if sessions.iter().any(|s| s.status == AgentStatus::Idle) {
+        Color::Yellow
+    } else {
+        Color::DarkGray
+    }
 }
 
 fn render_memory(f: &mut Frame, area: Rect, m: &Model, agent: Option<&AgentRow>) {
@@ -859,16 +873,6 @@ fn centered(outer: Rect, w: u16, h: u16) -> Rect {
     }
 }
 
-pub fn fmt_uptime(secs: i64) -> String {
-    let s = secs.max(0);
-    let (h, m) = (s / 3600, (s % 3600) / 60);
-    if h > 0 {
-        format!("{h}h{m:02}m")
-    } else {
-        format!("{m}m{:02}s", s % 60)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,7 +901,8 @@ mod tests {
                     sessions: vec![SessionRow {
                         name: "cortado_newsletter_scout_1".into(),
                         n: 1,
-                        created_unix: 1000,
+                        status: AgentStatus::Working,
+                        pane_id: "w1:p2".into(),
                         model: "kimi".into(),
                     }],
                     memory: vec![MemFile {
@@ -913,7 +918,7 @@ mod tests {
 
     fn rendered(m: &Model, snap: &Snapshot) -> String {
         let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
-        terminal.draw(|f| render(f, m, snap, 1000 + 3723)).unwrap();
+        terminal.draw(|f| render(f, m, snap)).unwrap();
         buffer_text(terminal.backend())
     }
 
@@ -979,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    fn sessions_tab_shows_name_model_uptime() {
+    fn sessions_tab_shows_name_model_status() {
         let m = Model {
             sel: Some(RailSel::Agent(s("newsletter"), s("scout"))),
             ..Default::default()
@@ -987,7 +992,29 @@ mod tests {
         let text = rendered(&m, &snap());
         assert!(text.contains("cortado_newsletter_scout_1"));
         assert!(text.contains("kimi"));
-        assert!(text.contains("1h02m"));
+        assert!(text.contains("working"));
+    }
+
+    #[test]
+    fn badge_prefers_blocked_over_working_over_idle() {
+        use cortado_herdr::AgentStatus::*;
+        let row = |status| crate::tui::snapshot::SessionRow {
+            name: "cortado_t_a_1".into(),
+            n: 1,
+            status,
+            pane_id: "w1:p2".into(),
+            model: "m".into(),
+        };
+        assert_eq!(
+            badge_style(&[row(Idle), row(Working)]),
+            ratatui::style::Color::Green
+        );
+        assert_eq!(
+            badge_style(&[row(Blocked), row(Working)]),
+            ratatui::style::Color::Red
+        );
+        assert_eq!(badge_style(&[row(Idle)]), ratatui::style::Color::Yellow);
+        assert_eq!(badge_style(&[]), ratatui::style::Color::DarkGray);
     }
 
     #[test]
@@ -1050,16 +1077,9 @@ mod tests {
         assert!(text.contains("retrying"));
     }
 
-    #[test]
-    fn uptime_formats() {
-        assert_eq!(fmt_uptime(3723), "1h02m");
-        assert_eq!(fmt_uptime(59), "0m59s");
-        assert_eq!(fmt_uptime(-5), "0m00s");
-    }
-
     fn rendered_terminal(m: &Model, snap: &Snapshot) -> Terminal<TestBackend> {
         let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
-        terminal.draw(|f| render(f, m, snap, 1000 + 3723)).unwrap();
+        terminal.draw(|f| render(f, m, snap)).unwrap();
         terminal
     }
 
@@ -1150,9 +1170,7 @@ mod tests {
             ..Default::default()
         };
         let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
-        terminal
-            .draw(|f| render(f, &m, &snap(), 1000 + 3723))
-            .unwrap();
+        terminal.draw(|f| render(f, &m, &snap())).unwrap();
         assert!(any_cell_matches(terminal.backend(), |c| {
             c.bg == crate::tui::theme::SELECTION_BG
         }));
@@ -1168,9 +1186,7 @@ mod tests {
             ..Default::default()
         };
         let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
-        terminal
-            .draw(|f| render(f, &m, &snap(), 1000 + 3723))
-            .unwrap();
+        terminal.draw(|f| render(f, &m, &snap())).unwrap();
         assert!(any_cell_matches(terminal.backend(), |c| {
             c.fg == crate::tui::theme::TEAM_FG && c.bg == crate::tui::theme::SELECTION_BG
         }));
@@ -1183,9 +1199,7 @@ mod tests {
             ..Default::default()
         };
         let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
-        terminal
-            .draw(|f| render(f, &m, &snap(), 1000 + 3723))
-            .unwrap();
+        terminal.draw(|f| render(f, &m, &snap())).unwrap();
         assert!(any_cell_matches(terminal.backend(), |c| {
             c.fg == crate::tui::theme::BORDER_FG
         }));
